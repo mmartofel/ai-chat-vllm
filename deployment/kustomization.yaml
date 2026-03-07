@@ -1,0 +1,5 @@
+resources:
+  - configmap-chat-ui.yaml
+  - deployment-chat-ui.yaml
+  - service-chat-ui.yaml
+  - routechat-ui.yaml

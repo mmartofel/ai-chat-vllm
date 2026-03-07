@@ -1,0 +1,45 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: chat-ui
+  labels:
+    app: chat-ui
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chat-ui
+  template:
+    metadata:
+      labels:
+        app: chat-ui
+    spec:
+      containers:
+        - name: container
+          image: 'quay.io/mmartofe/ai-chat:latest'
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          env:
+            - name: LLM_MODEL
+              valueFrom:
+                configMapKeyRef:
+                  name: chat-ui
+                  key: LLM_MODEL
+            - name: LLM_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: chat-ui
+                  key: LLM_API_URL
+            - name: LLM_API_KEY
+              valueFrom:
+                configMapKeyRef:
+                  name: chat-ui
+                  key: LLM_API_KEY
+          resources:
+             limits:
+                memory: "300Mi"
+                cpu: "0.3"
+             requests:
+                memory: "100Mi"
+                cpu: "0.1"

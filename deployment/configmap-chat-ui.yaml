@@ -1,0 +1,8 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: chat-ui
+data:
+  LLM_MODEL: 'Qwen/Qwen2.5-7B-Instruct-AWQ'
+  LLM_API_URL: 'http://vllm.vllm-inference.svc.cluster.local:8000/v1'
+  LLM_API_KEY: 'dummy-key'
