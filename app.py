@@ -1,4 +1,5 @@
 import os
+import logging
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,6 +14,12 @@ load_dotenv()
 API_BASE_URL = os.getenv("LLM_API_URL", "http://localhost:11434/v1")
 API_KEY = os.getenv("LLM_API_KEY", "ollama")
 MODEL_NAME = os.getenv("LLM_MODEL", "mistral")
+
+# Log the configuration
+logger = logging.getLogger("uvicorn.app")
+logger.warning(f"LLM_NAME = {MODEL_NAME}")
+logger.warning(f"LLM_API_URL = {API_BASE_URL}")
+logger.warning(f"LLM_API_KEY = {API_KEY}")
 
 app = FastAPI()
 
