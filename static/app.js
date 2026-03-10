@@ -15,6 +15,13 @@ createApp({
         const serverInfo = ref({ model: '', url: '' });
         const lastResponseMs = ref(null);
 
+        // Auth state
+        const isAuthenticated = ref(false);
+        const currentUser = ref('');
+        const loginForm = ref({ username: '', password: '' });
+        const loginError = ref('');
+        const loginLoading = ref(false);
+
         const STORAGE_KEY = 'ai-chat-conversations';
 
         // --- Persistence ---
@@ -135,6 +142,42 @@ createApp({
             });
         };
 
+        // --- Auth ---
+
+        const login = async () => {
+            loginError.value = '';
+            loginLoading.value = true;
+            try {
+                const res = await fetch('/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(loginForm.value)
+                });
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    loginError.value = data.detail || 'Invalid credentials';
+                    return;
+                }
+                const data = await res.json();
+                isAuthenticated.value = true;
+                currentUser.value = data.username;
+                loginForm.value = { username: '', password: '' };
+                loadFromStorage();
+                currentConvId.value = generateId();
+            } finally {
+                loginLoading.value = false;
+            }
+        };
+
+        const logout = async () => {
+            await fetch('/auth/logout', { method: 'POST' });
+            isAuthenticated.value = false;
+            currentUser.value = '';
+            messages.value = [];
+            conversations.value = [];
+            loginError.value = '';
+        };
+
         // --- Send message ---
 
         const sendMessage = async () => {
@@ -157,6 +200,11 @@ createApp({
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ messages: messages.value.slice(0, -1) })
                 });
+
+                if (response.status === 401) {
+                    isAuthenticated.value = false;
+                    return;
+                }
 
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
@@ -189,8 +237,17 @@ createApp({
         // --- Init ---
 
         onMounted(async () => {
-            loadFromStorage();
-            currentConvId.value = generateId();
+            try {
+                const res = await fetch('/auth/me');
+                if (res.ok) {
+                    const data = await res.json();
+                    isAuthenticated.value = true;
+                    currentUser.value = data.username;
+                    loadFromStorage();
+                    currentConvId.value = generateId();
+                }
+            } catch (_) {}
+
             try {
                 const res = await fetch('/health');
                 const data = await res.json();
@@ -201,8 +258,10 @@ createApp({
         return {
             userInput, messages, isStreaming, status, textareaRef,
             sidebarOpen, conversations, currentConvId, serverInfo, lastResponseMs,
+            isAuthenticated, currentUser, loginForm, loginError, loginLoading,
             sendMessage, renderMarkdown, autoResize,
-            newChat, loadConversation, deleteConversation, formatDate
+            newChat, loadConversation, deleteConversation, formatDate,
+            login, logout
         };
     }
 }).mount('#app');
