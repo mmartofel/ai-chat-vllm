@@ -28,13 +28,24 @@ Copy `.env` (not committed) with:
 LLM_API_URL=http://localhost:11434/v1
 LLM_API_KEY=ollama
 LLM_MODEL=mistral
+
+DB_URL=postgresql://admin:admin@localhost:5432/aichat
+JWT_SECRET=<generate with: python -c "import secrets; print(secrets.token_hex(32))">
+JWT_EXPIRE_HOURS=8          # optional, default 8
+COOKIE_SECURE=false         # set true in production (HTTPS)
 ```
 
 Supports any OpenAI-compatible API (Ollama, vLLM, Llama Stack).
 
 ## Architecture
 
-**Backend** (`app.py`): FastAPI app with two routes — `POST /chat` streams LLM responses using the async OpenAI client, and `GET /health`. Static files are served from `static/`.
+**Backend** (`app.py`): FastAPI app with the following routes:
+- `POST /auth/login` / `POST /auth/logout` — session management; JWT stored in an HTTP-only, SameSite=strict cookie
+- `GET /auth/me` — returns the currently authenticated user
+- `POST /chat` — streams LLM responses via the async OpenAI client; requires a valid JWT cookie
+- `GET /health` — server info (model name, URL)
+
+Static files are served from `static/`. PostgreSQL is accessed via an `asyncpg` connection pool created at startup. The schema (`users` table) is auto-created on first boot, and a default `admin/admin` user is inserted if the table is empty (a warning is logged — change the password immediately). New Python dependencies: `asyncpg`, `bcrypt`, `python-jose[cryptography]`.
 
 **Frontend** (`static/`): A single-page app using Vue.js 3 (Composition API), Tailwind CSS, Marked.js, and Highlight.js — all loaded via CDN, no build step. `app.js` handles message state, streaming via `fetch`, markdown rendering, and conversation history persisted to `localStorage`. `index.html` is the entry point.
 

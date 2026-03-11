@@ -88,7 +88,6 @@ LLM_MODEL=<deployed-model>
 
 ```
 app.py               FastAPI backend (streaming, static file serving)
-seed_user.py         CLI tool to create/update user accounts
 requirements.txt     Python dependencies
 dev.sh               Local dev startup script
 static/
@@ -123,13 +122,7 @@ deployment/          Kubernetes / OpenShift manifests (Kustomize)
 
 ## User Management
 
-On first boot the app auto-creates the `users` table and seeds an `admin/admin` account (a warning is logged — change this password before exposing the app).
-
-To add or update users:
-
-```bash
-python seed_user.py <username> <password>
-```
+On first boot the app auto-creates the `users` table and seeds an `admin/admin` account (a warning is logged — change this password before exposing the app). There is no CLI tool for managing users.
 
 ## Linting
 
