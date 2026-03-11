@@ -7,14 +7,16 @@ Scales from a local laptop to production on Red Hat OpenShift without code chang
 ## Features
 
 - **Real-time streaming** — responses appear token by token as they arrive
-- **Conversation history** — past chats are saved in the browser and listed in a sidebar; switch between them at any time
+- **Conversation history** — past chats are persisted in PostgreSQL per user and listed in a sidebar; history survives page refreshes, browser clears, and device switches. Messages lazy-load on first open. Existing localStorage history is offered for migration on first login.
 - **New Chat** — start a fresh conversation without losing previous ones
 - **Markdown + syntax highlighting** — full Markdown support with code blocks and a one-click copy button
 - **Status bar** — shows the active model name, inference server URL, and last response time
 - **Per-message timing** — each assistant reply shows how long it took to generate
 - **No build step** — frontend uses CDN-loaded Vue 3, Tailwind CSS, Marked.js, and Highlight.js
 - **User authentication** — login form protects the chat; sessions use a signed JWT stored in an httpOnly cookie
-- **PostgreSQL-backed users** — user accounts stored in Postgres; default `admin/admin` created on first boot
+- **Role-based access control** — three built-in roles (`admin`, `moderator`, `user`) with fine-grained permissions (`chat`, `manage_users`, `manage_roles`, `moderate_content`); custom roles can be added
+- **Admin panel** — web UI at `/admin` for managing users and roles; accessible only to admins
+- **PostgreSQL-backed users** — user accounts, roles, and permissions stored in Postgres; default `admin/admin` + test users seeded on first boot
 
 ## Stack
 
@@ -24,8 +26,8 @@ Scales from a local laptop to production on Red Hat OpenShift without code chang
 | LLM client | `openai` Python library (async streaming) |
 | Frontend | Vue.js 3 (Composition API), Tailwind CSS |
 | Markdown | Marked.js + Highlight.js |
-| Persistence | Browser `localStorage` |
-| Auth | `bcrypt` (password hashing), `python-jose` (JWT) |
+| Persistence | PostgreSQL (server) + `localStorage` (client cache) |
+| Auth & RBAC | `bcrypt` (passwords), `python-jose` (JWT), role/permission tables in PostgreSQL |
 | Database | PostgreSQL via `asyncpg` |
 | Deployment | Podman / Docker, Kubernetes / OpenShift |
 
@@ -108,6 +110,18 @@ deployment/          Kubernetes / OpenShift manifests (Kustomize)
 | `POST` | `/auth/login` | Verify credentials; sets httpOnly JWT cookie |
 | `POST` | `/auth/logout` | Clears the auth cookie |
 | `GET` | `/auth/me` | Returns `{"username": ...}` for session validation |
+| `GET` | `/conversations` | List conversation metadata for the current user (requires auth) |
+| `GET` | `/conversations/{id}` | Fetch a single conversation with messages (requires auth) |
+| `PUT` | `/conversations/{id}` | Create or update a conversation (requires auth) |
+| `DELETE` | `/conversations/{id}` | Delete a conversation (requires auth) |
+| `GET` | `/admin/users` | List all users (requires `manage_users`) |
+| `POST` | `/admin/users` | Create a user (requires `manage_users`) |
+| `PUT` | `/admin/users/{id}` | Update user role / active flag (requires `manage_users`) |
+| `DELETE` | `/admin/users/{id}` | Delete a user (requires `manage_users`) |
+| `GET` | `/admin/roles` | List roles with permissions (requires `manage_roles`) |
+| `POST` | `/admin/roles` | Create a custom role (requires `manage_roles`) |
+| `PUT` | `/admin/roles/{id}` | Update role name and permissions (requires `manage_roles`) |
+| `DELETE` | `/admin/roles/{id}` | Delete a non-built-in role (requires `manage_roles`) |
 
 `POST /chat` requires a valid session cookie and returns `401` if no valid cookie is present.
 
@@ -122,7 +136,11 @@ deployment/          Kubernetes / OpenShift manifests (Kustomize)
 
 ## User Management
 
-On first boot the app auto-creates the `users` table and seeds an `admin/admin` account (a warning is logged — change this password before exposing the app). There is no CLI tool for managing users.
+On first boot the app auto-creates the `users`, `roles`, `permissions`, `role_permissions`, and `conversations` tables. Three built-in roles are seeded at every boot (idempotent): `admin` (all permissions: `chat`, `manage_users`, `manage_roles`, `moderate_content`), `moderator` (`chat`, `moderate_content`), and `user` (`chat`). Built-in roles cannot be renamed or deleted (enforced server-side).
+
+If the `users` table is empty, three accounts are seeded: `admin/admin`, `moderator_user/moderator`, and `regular_user/user`. A warning is logged — change the `admin` password before exposing the app.
+
+For ongoing user and role management, use the admin panel at `/admin` (requires an account with the `admin` role). The panel provides a **Users** tab (create, edit role/active, delete) and a **Roles** tab (create custom roles, assign permissions, delete).
 
 ## Linting
 

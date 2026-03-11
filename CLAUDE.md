@@ -44,12 +44,28 @@ Supports any OpenAI-compatible API (Ollama, vLLM, Llama Stack).
 - `GET /auth/me` — returns the currently authenticated user
 - `POST /chat` — streams LLM responses via the async OpenAI client; requires a valid JWT cookie
 - `GET /health` — server info (model name, URL)
+- `GET /conversations` — list conversation metadata for the authenticated user (ordered by `updated_at DESC`)
+- `GET /conversations/{id}` — fetch a single conversation with full message history
+- `PUT /conversations/{id}` — create or update a conversation (upsert)
+- `DELETE /conversations/{id}` — delete a conversation; 404 if not found or not owned by caller
+- `GET /admin/users` — list all users with role (requires `manage_users`)
+- `POST /admin/users` — create a user (requires `manage_users`)
+- `PUT /admin/users/{id}` — update role/active flag; cannot modify own account (requires `manage_users`)
+- `DELETE /admin/users/{id}` — delete user; cannot delete own account (requires `manage_users`)
+- `GET /admin/roles` — list roles with permissions (requires `manage_roles`)
+- `POST /admin/roles` — create a custom role (requires `manage_roles`)
+- `PUT /admin/roles/{id}` — update role name and permissions; built-in names are locked (requires `manage_roles`)
+- `DELETE /admin/roles/{id}` — delete a non-built-in role (requires `manage_roles`)
 
-Static files are served from `static/`. PostgreSQL is accessed via an `asyncpg` connection pool created at startup. The schema (`users` table) is auto-created on first boot, and a default `admin/admin` user is inserted if the table is empty (a warning is logged — change the password immediately). New Python dependencies: `asyncpg`, `bcrypt`, `python-jose[cryptography]`.
+Static files are served from `static/`. PostgreSQL is accessed via an `asyncpg` connection pool created at startup. The schema (`users`, `roles`, `permissions`, `role_permissions`, and `conversations` tables) is auto-created on first boot, and a default `admin/admin` user is inserted if the table is empty (a warning is logged — change the password immediately). `json` is used from the stdlib for conversation serialization (no new pip deps).
 
-**Frontend** (`static/`): A single-page app using Vue.js 3 (Composition API), Tailwind CSS, Marked.js, and Highlight.js — all loaded via CDN, no build step. `app.js` handles message state, streaming via `fetch`, markdown rendering, and conversation history persisted to `localStorage`. `index.html` is the entry point.
+Authorization uses `require_permission(perm)` as a FastAPI dependency. Three built-in roles are seeded at startup: `admin` (all permissions), `moderator` (`chat`, `moderate_content`), `user` (`chat`). Built-in roles cannot be renamed or deleted. Custom roles can be created via the admin panel.
 
-The frontend sends the full conversation history on each request; the backend forwards it directly to the LLM API and streams the response back. Conversation history is stored as `ai-chat-conversations` in `localStorage`. Server info (model name, URL) is fetched from `GET /health` on mount.
+**Frontend** (`static/`): A single-page app using Vue.js 3 (Composition API), Tailwind CSS, Marked.js, and Highlight.js — all loaded via CDN, no build step. `app.js` handles message state, streaming via `fetch`, markdown rendering, and conversation history. Conversations are persisted to PostgreSQL via the REST API; `localStorage` is used as a local cache and cleared on logout. Sidebar conversations lazy-load their messages on first open. `index.html` is the entry point.
+
+`admin.html` + `admin.js` provide the admin panel (Vue 3 SPA, Tailwind, no build step) served at `/admin`. It is auth-gated — on mount it calls `GET /auth/me` and redirects to `/` if the user's role is not `admin`. The panel has two tabs: **Users** (list, create, edit role/active, delete) and **Roles** (list, create, edit name/permissions, delete).
+
+The frontend sends the full conversation history on each request; the backend forwards it directly to the LLM API and streams the response back. Server info (model name, URL) is fetched from `GET /health` on mount.
 
 ## Deployment
 

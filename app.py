@@ -1,4 +1,5 @@
 import os
+import json
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -73,12 +74,26 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 );
 
 ALTER TABLE users ADD COLUMN IF NOT EXISTS role_id INTEGER REFERENCES roles(id);
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id         VARCHAR(32)  PRIMARY KEY,
+    user_id    INTEGER      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    title      VARCHAR(255) NOT NULL DEFAULT '',
+    messages   JSONB        NOT NULL DEFAULT '[]',
+    created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_updated
+    ON conversations(user_id, updated_at DESC);
 """
 
 
 async def init_db(pool: asyncpg.Pool):
     async with pool.acquire() as conn:
         await conn.execute(INIT_SQL)
+
+        # Log database connection and seeding info
+        logger.warning("Connecting to database ...")
 
         # Seed permissions
         for perm in ("chat", "manage_users", "manage_roles", "moderate_content"):
@@ -224,6 +239,12 @@ class UpdateRoleRequest(BaseModel):
     permissions: list[str] = []
 
 
+class ConversationUpsertRequest(BaseModel):
+    title: str
+    messages: list        # [{role, content, durationMs}]
+    created_at: int       # Unix ms from client
+
+
 # --- Streaming ---
 
 async def stream_generator(messages, model):
@@ -292,6 +313,94 @@ async def chat_endpoint(request: ChatRequest, user: dict = Depends(require_permi
 @app.get("/health")
 async def health_check():
     return {"status": "ok", "target": API_BASE_URL, "model": MODEL_NAME}
+
+
+# --- Conversation helpers ---
+
+async def get_user_id(conn, username: str) -> int:
+    uid = await conn.fetchval("SELECT id FROM users WHERE username=$1", username)
+    if uid is None:
+        raise HTTPException(status_code=401, detail="User not found")
+    return uid
+
+
+# --- Conversation routes ---
+
+@app.get("/conversations")
+async def list_conversations(request: Request, user: dict = Depends(require_permission("chat"))):
+    pool: asyncpg.Pool = request.app.state.db
+    async with pool.acquire() as conn:
+        uid = await get_user_id(conn, user["username"])
+        rows = await conn.fetch(
+            """SELECT id, title, jsonb_array_length(messages) AS message_count,
+                      created_at, updated_at
+               FROM conversations
+               WHERE user_id=$1
+               ORDER BY updated_at DESC""",
+            uid
+        )
+    return [
+        {
+            "id": r["id"],
+            "title": r["title"],
+            "message_count": r["message_count"],
+            "created_at": r["created_at"].isoformat(),
+            "updated_at": r["updated_at"].isoformat(),
+        }
+        for r in rows
+    ]
+
+
+@app.get("/conversations/{conv_id}")
+async def get_conversation(conv_id: str, request: Request, user: dict = Depends(require_permission("chat"))):
+    pool: asyncpg.Pool = request.app.state.db
+    async with pool.acquire() as conn:
+        uid = await get_user_id(conn, user["username"])
+        row = await conn.fetchrow(
+            "SELECT id, title, messages, created_at, updated_at FROM conversations WHERE id=$1 AND user_id=$2",
+            conv_id, uid
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "messages": json.loads(row["messages"]),
+        "created_at": row["created_at"].isoformat(),
+        "updated_at": row["updated_at"].isoformat(),
+    }
+
+
+@app.put("/conversations/{conv_id}")
+async def upsert_conversation(conv_id: str, body: ConversationUpsertRequest, request: Request, user: dict = Depends(require_permission("chat"))):
+    pool: asyncpg.Pool = request.app.state.db
+    async with pool.acquire() as conn:
+        uid = await get_user_id(conn, user["username"])
+        row = await conn.fetchrow(
+            """INSERT INTO conversations (id, user_id, title, messages, created_at, updated_at)
+               VALUES ($1, $2, $3, $4::jsonb, to_timestamp($5 / 1000.0), NOW())
+               ON CONFLICT (id) DO UPDATE
+                 SET title = EXCLUDED.title, messages = EXCLUDED.messages, updated_at = NOW()
+               WHERE conversations.user_id = $2
+               RETURNING id, updated_at""",
+            conv_id, uid, body.title, json.dumps(body.messages), body.created_at
+        )
+    if not row:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return {"id": row["id"], "updated_at": row["updated_at"].isoformat()}
+
+
+@app.delete("/conversations/{conv_id}", status_code=204)
+async def delete_conversation(conv_id: str, request: Request, user: dict = Depends(require_permission("chat"))):
+    pool: asyncpg.Pool = request.app.state.db
+    async with pool.acquire() as conn:
+        uid = await get_user_id(conn, user["username"])
+        deleted = await conn.fetchval(
+            "DELETE FROM conversations WHERE id=$1 AND user_id=$2 RETURNING id",
+            conv_id, uid
+        )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Conversation not found")
 
 
 # --- Admin: Users ---

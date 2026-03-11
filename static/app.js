@@ -31,12 +31,72 @@ createApp({
             localStorage.setItem(STORAGE_KEY, JSON.stringify(conversations.value));
         };
 
-        const loadFromStorage = () => {
+        // --- Server API helpers (fire-and-forget, swallow errors) ---
+
+        const apiSaveConversation = async (conv) => {
             try {
-                const raw = localStorage.getItem(STORAGE_KEY);
-                if (raw) conversations.value = JSON.parse(raw);
-            } catch (_) {
-                conversations.value = [];
+                await fetch(`/conversations/${conv.id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        title: conv.title,
+                        messages: conv.messages,
+                        created_at: conv.createdAt
+                    })
+                });
+            } catch (e) { console.error('apiSaveConversation', e); }
+        };
+
+        const apiDeleteConversation = async (id) => {
+            try {
+                await fetch(`/conversations/${id}`, { method: 'DELETE' });
+            } catch (e) { console.error('apiDeleteConversation', e); }
+        };
+
+        const apiLoadConversations = async () => {
+            try {
+                const res = await fetch('/conversations');
+                if (!res.ok) return null;
+                return await res.json();
+            } catch (e) { console.error('apiLoadConversations', e); return null; }
+        };
+
+        const apiLoadConversationMessages = async (id) => {
+            try {
+                const res = await fetch(`/conversations/${id}`);
+                if (!res.ok) return null;
+                return await res.json();
+            } catch (e) { console.error('apiLoadConversationMessages', e); return null; }
+        };
+
+        const loadConversationsFromServer = async () => {
+            const serverConvs = await apiLoadConversations();
+            if (serverConvs && serverConvs.length > 0) {
+                conversations.value = serverConvs.map(c => ({
+                    id: c.id,
+                    title: c.title,
+                    messages: [],
+                    createdAt: new Date(c.created_at).getTime(),
+                    _messagesLoaded: false
+                }));
+                persistConversations();
+            } else {
+                // Server is empty — check localStorage for migration
+                let local = [];
+                try {
+                    const raw = localStorage.getItem(STORAGE_KEY);
+                    if (raw) local = JSON.parse(raw);
+                } catch (_) {}
+                if (local.length > 0) {
+                    const migrate = confirm(`You have ${local.length} conversation(s) saved locally. Migrate them to the server?`);
+                    if (migrate) {
+                        conversations.value = local;
+                        for (const conv of local) {
+                            await apiSaveConversation(conv);
+                        }
+                        persistConversations();
+                    }
+                }
             }
         };
 
@@ -59,6 +119,8 @@ createApp({
                 });
             }
             persistConversations();
+            const conv = conversations.value.find(c => c.id === currentConvId.value);
+            if (conv) apiSaveConversation(conv);
         };
 
         // --- Conversation actions ---
@@ -72,10 +134,14 @@ createApp({
             nextTick(() => textareaRef.value?.focus());
         };
 
-        const loadConversation = (id) => {
+        const loadConversation = async (id) => {
             saveCurrentChat();
             const conv = conversations.value.find(c => c.id === id);
             if (!conv) return;
+            if (!conv._messagesLoaded && conv.messages.length === 0) {
+                const full = await apiLoadConversationMessages(id);
+                if (full) { conv.messages = full.messages; conv._messagesLoaded = true; }
+            }
             messages.value = [...conv.messages];
             currentConvId.value = id;
             lastResponseMs.value = null;
@@ -84,6 +150,7 @@ createApp({
         };
 
         const deleteConversation = (id) => {
+            apiDeleteConversation(id);
             conversations.value = conversations.value.filter(c => c.id !== id);
             persistConversations();
             if (currentConvId.value === id) {
@@ -164,7 +231,7 @@ createApp({
                 currentUser.value = data.username;
                 currentRole.value = data.role || '';
                 loginForm.value = { username: '', password: '' };
-                loadFromStorage();
+                await loadConversationsFromServer();
                 currentConvId.value = generateId();
             } finally {
                 loginLoading.value = false;
@@ -179,6 +246,7 @@ createApp({
             messages.value = [];
             conversations.value = [];
             loginError.value = '';
+            localStorage.removeItem(STORAGE_KEY);
         };
 
         // --- Send message ---
@@ -247,7 +315,7 @@ createApp({
                     isAuthenticated.value = true;
                     currentUser.value = data.username;
                     currentRole.value = data.role || '';
-                    loadFromStorage();
+                    await loadConversationsFromServer();
                     currentConvId.value = generateId();
                 }
             } catch (_) {}
