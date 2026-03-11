@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Panel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script defer src="admin.js"></script>
+</head>
+<body class="bg-gray-100 min-h-screen font-sans">
+
+<div id="admin-app">
+
+    <!-- Loading -->
+    <div v-if="authState === 'checking'" class="flex items-center justify-center min-h-screen">
+        <div class="text-gray-500 text-sm">Checking access…</div>
+    </div>
+
+    <!-- Access Denied -->
+    <div v-else-if="authState === 'denied'" class="flex items-center justify-center min-h-screen">
+        <div class="bg-white rounded-2xl shadow-md p-10 text-center max-w-sm">
+            <div class="text-4xl mb-4">🚫</div>
+            <h1 class="text-xl font-bold text-gray-800 mb-2">Access Denied</h1>
+            <p class="text-gray-500 text-sm mb-6">You do not have permission to view this page.</p>
+            <a href="/" class="text-indigo-600 hover:underline text-sm">← Back to Chat</a>
+        </div>
+    </div>
+
+    <!-- Admin UI -->
+    <template v-else-if="authState === 'ok'">
+
+        <!-- Nav -->
+        <nav class="bg-indigo-700 text-white px-6 py-3 flex justify-between items-center shadow">
+            <div class="flex items-center gap-4">
+                <span class="font-bold text-base">Admin Panel</span>
+                <a href="/" class="text-indigo-200 hover:text-white text-sm transition-colors">← Back to Chat</a>
+            </div>
+            <span class="text-indigo-200 text-sm">{{ currentUsername }}</span>
+        </nav>
+
+        <div class="max-w-5xl mx-auto px-4 py-8">
+
+            <!-- Tabs -->
+            <div class="flex gap-2 mb-6">
+                <button
+                    @click="activeTab = 'users'"
+                    class="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                    :class="activeTab === 'users' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'"
+                >Users</button>
+                <button
+                    @click="activeTab = 'roles'"
+                    class="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                    :class="activeTab === 'roles' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'"
+                >Roles</button>
+            </div>
+
+            <!-- Users Tab -->
+            <div v-if="activeTab === 'users'">
+
+                <!-- Create User Form -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 mb-6">
+                    <button @click="showCreateUser = !showCreateUser"
+                        class="w-full text-left px-5 py-4 text-sm font-semibold text-gray-700 flex justify-between items-center">
+                        <span>+ Create New User</span>
+                        <span class="text-gray-400">{{ showCreateUser ? '▲' : '▼' }}</span>
+                    </button>
+                    <div v-if="showCreateUser" class="px-5 pb-5 border-t border-gray-100 pt-4">
+                        <form @submit.prevent="createUser" class="flex flex-wrap gap-3 items-end">
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Username</label>
+                                <input v-model="newUser.username" required
+                                    class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Password</label>
+                                <input v-model="newUser.password" type="password" required
+                                    class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Role</label>
+                                <select v-model="newUser.role_name"
+                                    class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                    <option v-for="r in roles" :key="r.id" :value="r.name">{{ r.name }}</option>
+                                </select>
+                            </div>
+                            <div class="flex items-center gap-2 pb-0.5">
+                                <input type="checkbox" v-model="newUser.is_active" id="nu-active" class="rounded" />
+                                <label for="nu-active" class="text-sm text-gray-600">Active</label>
+                            </div>
+                            <button type="submit"
+                                class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700 transition-colors">
+                                Create
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Users Table -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+                            <tr>
+                                <th class="px-4 py-3 text-left">ID</th>
+                                <th class="px-4 py-3 text-left">Username</th>
+                                <th class="px-4 py-3 text-left">Role</th>
+                                <th class="px-4 py-3 text-left">Active</th>
+                                <th class="px-4 py-3 text-left">Created</th>
+                                <th class="px-4 py-3 text-left">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-if="users.length === 0">
+                                <td colspan="6" class="px-4 py-6 text-center text-gray-400">No users found.</td>
+                            </tr>
+                            <tr v-for="u in users" :key="u.id" class="border-t border-gray-100 hover:bg-gray-50">
+                                <td class="px-4 py-3 text-gray-400">{{ u.id }}</td>
+                                <td class="px-4 py-3 font-medium text-gray-800">{{ u.username }}</td>
+                                <td class="px-4 py-3">
+                                    <span class="px-2 py-0.5 rounded-full text-xs font-medium"
+                                        :class="{
+                                            'bg-red-100 text-red-700': u.role_name === 'admin',
+                                            'bg-blue-100 text-blue-700': u.role_name === 'moderator',
+                                            'bg-gray-100 text-gray-600': u.role_name === 'user',
+                                            'bg-purple-100 text-purple-700': !['admin','moderator','user'].includes(u.role_name)
+                                        }">{{ u.role_name }}</span>
+                                </td>
+                                <td class="px-4 py-3">
+                                    <span :class="u.is_active ? 'text-green-600' : 'text-gray-400'">
+                                        {{ u.is_active ? 'Yes' : 'No' }}
+                                    </span>
+                                </td>
+                                <td class="px-4 py-3 text-gray-400">{{ formatDate(u.created_at) }}</td>
+                                <td class="px-4 py-3 flex gap-2">
+                                    <button @click="openEditUser(u)"
+                                        class="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg transition-colors">
+                                        Edit
+                                    </button>
+                                    <button @click="deleteUser(u)"
+                                        class="text-xs bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1 rounded-lg transition-colors">
+                                        Delete
+                                    </button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Roles Tab -->
+            <div v-if="activeTab === 'roles'">
+
+                <!-- Create Role Form -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 mb-6">
+                    <button @click="showCreateRole = !showCreateRole"
+                        class="w-full text-left px-5 py-4 text-sm font-semibold text-gray-700 flex justify-between items-center">
+                        <span>+ Create New Role</span>
+                        <span class="text-gray-400">{{ showCreateRole ? '▲' : '▼' }}</span>
+                    </button>
+                    <div v-if="showCreateRole" class="px-5 pb-5 border-t border-gray-100 pt-4">
+                        <form @submit.prevent="createRole" class="space-y-3">
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Role Name</label>
+                                <input v-model="newRole.name" required
+                                    class="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-48" />
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-2">Permissions</label>
+                                <div class="flex flex-wrap gap-2">
+                                    <label v-for="p in allPermissions" :key="p" class="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
+                                        <input type="checkbox" :value="p" v-model="newRole.permissions" class="rounded" />
+                                        {{ p }}
+                                    </label>
+                                </div>
+                            </div>
+                            <button type="submit"
+                                class="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm hover:bg-indigo-700 transition-colors">
+                                Create Role
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Roles Table -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <table class="w-full text-sm">
+                        <thead class="bg-gray-50 text-gray-500 text-xs uppercase tracking-wide">
+                            <tr>
+                                <th class="px-4 py-3 text-left">ID</th>
+                                <th class="px-4 py-3 text-left">Name</th>
+                                <th class="px-4 py-3 text-left">Permissions</th>
+                                <th class="px-4 py-3 text-left">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-if="roles.length === 0">
+                                <td colspan="4" class="px-4 py-6 text-center text-gray-400">No roles found.</td>
+                            </tr>
+                            <tr v-for="r in roles" :key="r.id" class="border-t border-gray-100 hover:bg-gray-50">
+                                <td class="px-4 py-3 text-gray-400">{{ r.id }}</td>
+                                <td class="px-4 py-3 font-medium text-gray-800">{{ r.name }}</td>
+                                <td class="px-4 py-3">
+                                    <div class="flex flex-wrap gap-1">
+                                        <span v-for="p in r.permissions" :key="p"
+                                            class="px-2 py-0.5 bg-indigo-50 text-indigo-700 rounded text-xs">{{ p }}</span>
+                                        <span v-if="r.permissions.length === 0" class="text-gray-400 text-xs">none</span>
+                                    </div>
+                                </td>
+                                <td class="px-4 py-3 flex gap-2">
+                                    <button @click="openEditRole(r)"
+                                        class="text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 px-3 py-1 rounded-lg transition-colors">
+                                        Edit
+                                    </button>
+                                    <button @click="deleteRole(r)"
+                                        class="text-xs bg-red-50 hover:bg-red-100 text-red-600 px-3 py-1 rounded-lg transition-colors">
+                                        Delete
+                                    </button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Edit Modal -->
+        <div v-if="modal.open" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50" @click.self="modal.open = false">
+            <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md mx-4">
+
+                <!-- Edit User -->
+                <template v-if="modal.type === 'user'">
+                    <h2 class="text-base font-bold text-gray-800 mb-4">Edit User: {{ modal.data.username }}</h2>
+                    <form @submit.prevent="saveEditUser" class="space-y-4">
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-1">Role</label>
+                            <select v-model="modal.data.role_name"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                <option v-for="r in roles" :key="r.id" :value="r.name">{{ r.name }}</option>
+                            </select>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input type="checkbox" v-model="modal.data.is_active" id="edit-active" class="rounded" />
+                            <label for="edit-active" class="text-sm text-gray-600">Active</label>
+                        </div>
+                        <div class="flex gap-3 pt-2">
+                            <button type="submit"
+                                class="flex-1 bg-indigo-600 text-white py-2 rounded-lg text-sm hover:bg-indigo-700 transition-colors">Save</button>
+                            <button type="button" @click="modal.open = false"
+                                class="flex-1 bg-gray-100 text-gray-700 py-2 rounded-lg text-sm hover:bg-gray-200 transition-colors">Cancel</button>
+                        </div>
+                    </form>
+                </template>
+
+                <!-- Edit Role -->
+                <template v-if="modal.type === 'role'">
+                    <h2 class="text-base font-bold text-gray-800 mb-4">Edit Role: {{ modal.data.originalName }}</h2>
+                    <form @submit.prevent="saveEditRole" class="space-y-4">
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-1">Name</label>
+                            <input v-model="modal.data.name"
+                                class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                        </div>
+                        <div>
+                            <label class="block text-xs text-gray-500 mb-2">Permissions</label>
+                            <div class="flex flex-wrap gap-2">
+                                <label v-for="p in allPermissions" :key="p" class="flex items-center gap-1.5 text-sm text-gray-700 cursor-pointer">
+                                    <input type="checkbox" :value="p" v-model="modal.data.permissions" class="rounded" />
+                                    {{ p }}
+                                </label>
+                            </div>
+                        </div>
+                        <div class="flex gap-3 pt-2">
+                            <button type="submit"
+                                class="flex-1 bg-indigo-600 text-white py-2 rounded-lg text-sm hover:bg-indigo-700 transition-colors">Save</button>
+                            <button type="button" @click="modal.open = false"
+                                class="flex-1 bg-gray-100 text-gray-700 py-2 rounded-lg text-sm hover:bg-gray-200 transition-colors">Cancel</button>
+                        </div>
+                    </form>
+                </template>
+
+            </div>
+        </div>
+
+        <!-- Toast -->
+        <div v-if="toast.msg" class="fixed bottom-6 right-6 bg-gray-800 text-white px-4 py-3 rounded-xl shadow-lg text-sm z-50 max-w-xs">
+            {{ toast.msg }}
+        </div>
+
+    </template>
+
+</div>
+</body>
+</html>

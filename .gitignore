@@ -4,5 +4,4 @@ __pycache__/
 *.pyc
 .env
 .DS_Store
-idea.md
-login.md
+ideas

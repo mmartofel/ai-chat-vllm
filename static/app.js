@@ -18,6 +18,7 @@ createApp({
         // Auth state
         const isAuthenticated = ref(false);
         const currentUser = ref('');
+        const currentRole = ref('');
         const loginForm = ref({ username: '', password: '' });
         const loginError = ref('');
         const loginLoading = ref(false);
@@ -161,6 +162,7 @@ createApp({
                 const data = await res.json();
                 isAuthenticated.value = true;
                 currentUser.value = data.username;
+                currentRole.value = data.role || '';
                 loginForm.value = { username: '', password: '' };
                 loadFromStorage();
                 currentConvId.value = generateId();
@@ -173,6 +175,7 @@ createApp({
             await fetch('/auth/logout', { method: 'POST' });
             isAuthenticated.value = false;
             currentUser.value = '';
+            currentRole.value = '';
             messages.value = [];
             conversations.value = [];
             loginError.value = '';
@@ -243,6 +246,7 @@ createApp({
                     const data = await res.json();
                     isAuthenticated.value = true;
                     currentUser.value = data.username;
+                    currentRole.value = data.role || '';
                     loadFromStorage();
                     currentConvId.value = generateId();
                 }
@@ -258,7 +262,7 @@ createApp({
         return {
             userInput, messages, isStreaming, status, textareaRef,
             sidebarOpen, conversations, currentConvId, serverInfo, lastResponseMs,
-            isAuthenticated, currentUser, loginForm, loginError, loginLoading,
+            isAuthenticated, currentUser, currentRole, loginForm, loginError, loginLoading,
             sendMessage, renderMarkdown, autoResize,
             newChat, loadConversation, deleteConversation, formatDate,
             login, logout
