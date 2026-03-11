@@ -13,6 +13,8 @@ Scales from a local laptop to production on Red Hat OpenShift without code chang
 - **Status bar** — shows the active model name, inference server URL, and last response time
 - **Per-message timing** — each assistant reply shows how long it took to generate
 - **No build step** — frontend uses CDN-loaded Vue 3, Tailwind CSS, Marked.js, and Highlight.js
+- **User authentication** — login form protects the chat; sessions use a signed JWT stored in an httpOnly cookie
+- **PostgreSQL-backed users** — user accounts stored in Postgres; default `admin/admin` created on first boot
 
 ## Stack
 
@@ -23,11 +25,13 @@ Scales from a local laptop to production on Red Hat OpenShift without code chang
 | Frontend | Vue.js 3 (Composition API), Tailwind CSS |
 | Markdown | Marked.js + Highlight.js |
 | Persistence | Browser `localStorage` |
+| Auth | `bcrypt` (password hashing), `python-jose` (JWT) |
+| Database | PostgreSQL via `asyncpg` |
 | Deployment | Podman / Docker, Kubernetes / OpenShift |
 
 ## Quickstart
 
-**Prerequisites:** Python 3.10+, a running Ollama (or any OpenAI-compatible) inference server.
+**Prerequisites:** Python 3.10+, a running Ollama (or any OpenAI-compatible) inference server, and a PostgreSQL instance (or run `./podman/postgres.sh` for a local one via Podman Desktop).
 
 ```bash
 git clone <repo-url>
@@ -56,6 +60,10 @@ All configuration is via environment variables or a `.env` file in the project r
 | `LLM_API_URL` | `http://localhost:11434/v1` | OpenAI-compatible API base URL |
 | `LLM_API_KEY` | `ollama` | API key (any string works for local servers) |
 | `LLM_MODEL` | `mistral` | Model name to request |
+| `DB_URL` | `postgresql://admin:admin@localhost:5432/aichat` | PostgreSQL connection string |
+| `JWT_SECRET` | *(required)* | Secret key for signing JWTs — generate with `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `JWT_EXPIRE_HOURS` | `8` | Session lifetime in hours |
+| `COOKIE_SECURE` | `false` | Set `true` in production (HTTPS) to add the `Secure` flag to the auth cookie |
 
 ### Common setups
 
@@ -80,6 +88,7 @@ LLM_MODEL=<deployed-model>
 
 ```
 app.py               FastAPI backend (streaming, static file serving)
+seed_user.py         CLI tool to create/update user accounts
 requirements.txt     Python dependencies
 dev.sh               Local dev startup script
 static/
@@ -94,9 +103,14 @@ deployment/          Kubernetes / OpenShift manifests (Kustomize)
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/chat` | Send message history, receive streaming plain-text response |
+| `POST` | `/chat` | Send message history, receive streaming plain-text response (requires auth) |
 | `GET` | `/health` | Returns `{ status, target, model }` |
 | `GET` | `/` | Serves the frontend |
+| `POST` | `/auth/login` | Verify credentials; sets httpOnly JWT cookie |
+| `POST` | `/auth/logout` | Clears the auth cookie |
+| `GET` | `/auth/me` | Returns `{"username": ...}` for session validation |
+
+`POST /chat` requires a valid session cookie and returns `401` if no valid cookie is present.
 
 `POST /chat` body:
 ```json
@@ -105,6 +119,16 @@ deployment/          Kubernetes / OpenShift manifests (Kustomize)
     { "role": "user", "content": "Hello!" }
   ]
 }
+```
+
+## User Management
+
+On first boot the app auto-creates the `users` table and seeds an `admin/admin` account (a warning is logged — change this password before exposing the app).
+
+To add or update users:
+
+```bash
+python seed_user.py <username> <password>
 ```
 
 ## Linting

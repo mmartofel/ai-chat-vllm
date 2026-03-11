@@ -3,3 +3,6 @@ uvicorn
 openai
 python-dotenv
 ruff
+asyncpg
+bcrypt
+python-jose[cryptography]
