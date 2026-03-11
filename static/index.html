@@ -121,6 +121,10 @@
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
                             New Chat
                         </button>
+                        <a v-if="currentRole === 'admin'" href="/admin.html"
+                           class="text-xs bg-yellow-500 hover:bg-yellow-400 px-3 py-1.5 rounded transition-colors font-medium text-white">
+                          Admin
+                        </a>
                         <button @click="logout" class="text-xs bg-red-500 hover:bg-red-400 px-3 py-1.5 rounded transition-colors font-medium">Sign Out</button>
                     </div>
                 </header>
