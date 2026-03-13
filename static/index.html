@@ -73,7 +73,9 @@
                     </button>
                 </div>
 
-                <button @click="newChat" class="new-chat-btn">
+                <button @click="newChat"
+                        :disabled="isImageLoading || isStreaming"
+                        class="new-chat-btn disabled:opacity-50 disabled:cursor-not-allowed">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
                     New Chat
                 </button>
@@ -116,16 +118,27 @@
                     </div>
                     <div class="flex items-center gap-2">
                         <span class="text-xs bg-indigo-700 px-2 py-1 rounded font-medium">{{ status }}</span>
+                        <span v-if="isImageLoading" class="text-xs bg-yellow-500 px-2 py-1 rounded font-medium animate-pulse">
+                            ⏳ Processing image…
+                        </span>
                         <span class="text-xs text-indigo-200">Welcome, {{ currentUser }}!</span>
-                        <button @click="newChat" class="text-xs bg-indigo-500 hover:bg-indigo-400 px-3 py-1.5 rounded transition-colors flex items-center gap-1 font-medium" title="Start new conversation">
+                        <button @click="newChat"
+                                :disabled="isImageLoading || isStreaming"
+                                class="text-xs bg-indigo-500 hover:bg-indigo-400 px-3 py-1.5 rounded transition-colors flex items-center gap-1 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                                title="Start new conversation">
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
                             New Chat
                         </button>
                         <a v-if="currentRole === 'admin'" href="/admin.html"
-                           class="text-xs bg-yellow-500 hover:bg-yellow-400 px-3 py-1.5 rounded transition-colors font-medium text-white">
+                           :class="(isImageLoading || isStreaming) ? 'pointer-events-none opacity-50' : 'hover:bg-yellow-400'"
+                           class="text-xs bg-yellow-500 px-3 py-1.5 rounded transition-colors font-medium text-white">
                           Admin
                         </a>
-                        <button @click="logout" class="text-xs bg-red-500 hover:bg-red-400 px-3 py-1.5 rounded transition-colors font-medium">Sign Out</button>
+                        <button @click="logout"
+                                :disabled="isImageLoading || isStreaming"
+                                class="text-xs bg-red-500 hover:bg-red-400 px-3 py-1.5 rounded transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed">
+                          Sign Out
+                        </button>
                     </div>
                 </header>
 
@@ -143,7 +156,11 @@
                             <div class="text-xs font-semibold mb-1.5 opacity-50 uppercase tracking-wider">
                                 {{ msg.role === 'user' ? 'You' : 'AI Model' }}
                             </div>
-                            <div v-if="msg.role === 'assistant'" class="prose prose-sm max-w-none" v-html="renderMarkdown(msg.content)"></div>
+                            <template v-if="msg.type === 'image'">
+                                <img :src="msg.url" :alt="msg.content" class="rounded-lg max-w-full" style="max-height: 480px;" />
+                                <div class="text-xs mt-1 opacity-60">{{ msg.content }}</div>
+                            </template>
+                            <div v-else-if="msg.role === 'assistant'" class="prose prose-sm max-w-none" v-html="renderMarkdown(msg.content)"></div>
                             <div v-else class="whitespace-pre-wrap text-sm leading-relaxed">{{ msg.content }}</div>
                             <div v-if="msg.role === 'assistant' && msg.durationMs" class="msg-timing">
                                 ⏱ {{ (msg.durationMs / 1000).toFixed(1) }}s
@@ -164,10 +181,32 @@
                 <!-- Input Area -->
                 <div class="px-3 py-3 bg-white border-t border-gray-200 flex-shrink-0">
                     <form @submit.prevent="sendMessage" class="relative flex items-end gap-2">
+                        <!-- Hidden file input triggered by the button below -->
+                        <input
+                            ref="imageUploadRef"
+                            type="file"
+                            accept="image/*"
+                            class="hidden"
+                            @change="e => { if (e.target.files[0]) sendImage(e.target.files[0]); e.target.value = ''; }"
+                        />
+                        <!-- Upload button -->
+                        <button
+                            type="button"
+                            class="flex-shrink-0 p-2 text-gray-400 hover:text-indigo-600 disabled:opacity-40 transition-colors"
+                            :disabled="isStreaming || isImageLoading"
+                            @click="imageUploadRef.click()"
+                            title="Upload image for analysis">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0
+                                         012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2
+                                         2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                        </button>
                         <textarea
                             ref="textareaRef"
                             v-model="userInput"
-                            placeholder="Type your message here..."
+                            placeholder="Type a message, or /image &lt;prompt&gt; to generate an image…"
                             rows="1"
                             class="w-full p-3 pr-12 rounded-2xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm transition-all resize-none overflow-hidden min-h-[52px] max-h-[200px] text-sm"
                             :disabled="isStreaming"

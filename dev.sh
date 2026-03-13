@@ -19,3 +19,7 @@ uvicorn app:app \
   --host 0.0.0.0 \
   --port 8001 \
   --reload
+
+# To enable text-to-image generation, start the image service in a separate terminal:
+#   cd image_service && source .venv/bin/activate && uvicorn main:app --port 8100
+#   (First start downloads ~5 GB of model weights)

@@ -1,15 +1,20 @@
+import io
 import os
+import uuid
 import json
+import base64
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
 import bcrypt
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response
+import httpx
+from fastapi import Cookie, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from jose import JWTError, jwt
+from miniopy_async import Minio
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -25,6 +30,13 @@ DB_URL = os.getenv("DB_URL", "postgresql://admin:admin@localhost:5432/aichat")
 JWT_SECRET = os.getenv("JWT_SECRET", "changeme-insecure-default-secret")
 JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "8"))
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+VISION_MODEL      = os.getenv("VISION_MODEL", "moondream")
+IMAGE_SERVICE_URL = os.getenv("IMAGE_SERVICE_URL", "http://localhost:8100")
+MINIO_ENDPOINT    = os.getenv("MINIO_ENDPOINT", "http://localhost:9000")
+MINIO_ACCESS_KEY  = os.getenv("MINIO_ACCESS_KEY", "admin")
+MINIO_SECRET_KEY  = os.getenv("MINIO_SECRET_KEY", "admin123")
+MINIO_BUCKET      = os.getenv("MINIO_BUCKET", "images")
+MINIO_PUBLIC_BASE = os.getenv("MINIO_PUBLIC_BASE_URL", "http://localhost:9000/images")
 
 logger = logging.getLogger("uvicorn.app")
 logger.warning(f"LLM_NAME = {MODEL_NAME}")
@@ -34,6 +46,14 @@ logger.warning(f"DB_URL = {DB_URL}")
 
 # Initialize OpenAI Client
 client = AsyncOpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+
+# Initialize MinIO client
+minio_client = Minio(
+    MINIO_ENDPOINT.replace("http://", "").replace("https://", ""),
+    access_key=MINIO_ACCESS_KEY,
+    secret_key=MINIO_SECRET_KEY,
+    secure=MINIO_ENDPOINT.startswith("https://"),
+)
 
 # --- RBAC ---
 
@@ -86,6 +106,24 @@ CREATE TABLE IF NOT EXISTS conversations (
 );
 CREATE INDEX IF NOT EXISTS idx_conversations_user_updated
     ON conversations(user_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS image_generations (
+    id               UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    conversation_id  VARCHAR(32)  NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+    user_id          INTEGER      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    mode             VARCHAR(20)  NOT NULL CHECK (mode IN ('image_to_text', 'text_to_image')),
+    prompt           TEXT,
+    source_image_key TEXT,
+    result_image_key TEXT,
+    result_text      TEXT,
+    status           VARCHAR(20)  NOT NULL DEFAULT 'pending'
+                                  CHECK (status IN ('pending', 'processing', 'completed', 'failed')),
+    error_message    TEXT,
+    created_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+    completed_at     TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_image_gen_conversation ON image_generations(conversation_id);
+CREATE INDEX IF NOT EXISTS idx_image_gen_user         ON image_generations(user_id);
 """
 
 
@@ -246,6 +284,13 @@ class ConversationUpsertRequest(BaseModel):
     created_at: int       # Unix ms from client
 
 
+class ImageGenerateRequest(BaseModel):
+    conversation_id: str
+    prompt: str
+    width: int = 512
+    height: int = 512
+
+
 # --- Streaming ---
 
 async def stream_generator(messages, model):
@@ -323,6 +368,23 @@ async def get_user_id(conn, username: str) -> int:
     if uid is None:
         raise HTTPException(status_code=401, detail="User not found")
     return uid
+
+
+async def ensure_bucket():
+    """Create the images bucket if it does not exist yet, and ensure public read policy."""
+    exists = await minio_client.bucket_exists(MINIO_BUCKET)
+    if not exists:
+        await minio_client.make_bucket(MINIO_BUCKET)
+        policy = json.dumps({
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": {"AWS": ["*"]},
+                "Action": ["s3:GetObject"],
+                "Resource": [f"arn:aws:s3:::{MINIO_BUCKET}/*"],
+            }],
+        })
+        await minio_client.set_bucket_policy(MINIO_BUCKET, policy)
 
 
 # --- Conversation routes ---
@@ -561,6 +623,148 @@ async def admin_delete_role(role_id: int, request: Request, user: dict = Depends
         if role["name"] in BUILTIN_ROLES:
             raise HTTPException(status_code=400, detail="Cannot delete built-in roles")
         await conn.execute("DELETE FROM roles WHERE id=$1", role_id)
+
+
+# --- Image routes ---
+
+@app.post("/images/describe")
+async def image_describe(
+    request: Request,
+    conversation_id: str = Form(...),
+    prompt: str = Form(default="Describe this image in detail."),
+    file: UploadFile = File(...),
+    user: dict = Depends(require_permission("chat")),
+):
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Uploaded file must be an image")
+
+    pool: asyncpg.Pool = request.app.state.db
+    image_bytes = await file.read()
+    image_b64 = base64.b64encode(image_bytes).decode()
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in (file.filename or "") else "jpg"
+    generation_id = str(uuid.uuid4())
+
+    async with pool.acquire() as conn:
+        uid = await get_user_id(conn, user["username"])
+
+        await ensure_bucket()
+        object_key = f"uploads/{uid}/{generation_id}.{ext}"
+        await minio_client.put_object(
+            MINIO_BUCKET,
+            object_key,
+            io.BytesIO(image_bytes),
+            length=len(image_bytes),
+            content_type=file.content_type,
+        )
+
+        await conn.execute(
+            """INSERT INTO image_generations
+               (id, conversation_id, user_id, mode, source_image_key, status)
+               VALUES ($1, $2, $3, 'image_to_text', $4, 'processing')""",
+            uuid.UUID(generation_id), conversation_id, uid, object_key,
+        )
+
+    # Call vision model via the same OpenAI-compatible API used for chat
+    try:
+        vision_client = AsyncOpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+        response = await vision_client.chat.completions.create(
+            model=VISION_MODEL,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "image_url",
+                     "image_url": {"url": f"data:{file.content_type};base64,{image_b64}"}},
+                    {"type": "text", "text": prompt},
+                ],
+            }],
+        )
+        result_text = response.choices[0].message.content
+        img_status = "completed"
+        error_message = None
+    except Exception as e:
+        result_text = f"[Image analysis failed: {e}]"
+        img_status = "failed"
+        error_message = str(e)
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE image_generations
+               SET result_text=$1, status=$2, error_message=$3, completed_at=NOW()
+               WHERE id=$4""",
+            result_text, img_status, error_message, uuid.UUID(generation_id),
+        )
+
+    return {
+        "generation_id": generation_id,
+        "conversation_id": conversation_id,
+        "result_text": result_text,
+        "status": img_status,
+        "image_url": f"{MINIO_PUBLIC_BASE}/{object_key}",
+    }
+
+
+@app.post("/images/generate")
+async def image_generate(
+    body: ImageGenerateRequest,
+    request: Request,
+    user: dict = Depends(require_permission("chat")),
+):
+    pool: asyncpg.Pool = request.app.state.db
+    generation_id = str(uuid.uuid4())
+
+    async with pool.acquire() as conn:
+        uid = await get_user_id(conn, user["username"])
+        await conn.execute(
+            """INSERT INTO image_generations
+               (id, conversation_id, user_id, mode, prompt, status)
+               VALUES ($1, $2, $3, 'text_to_image', $4, 'processing')""",
+            uuid.UUID(generation_id), body.conversation_id, uid, body.prompt,
+        )
+
+    try:
+        async with httpx.AsyncClient(timeout=600) as http:   # CPU can be slow
+            resp = await http.post(
+                f"{IMAGE_SERVICE_URL}/generate",
+                json={"prompt": body.prompt, "width": body.width, "height": body.height},
+            )
+            resp.raise_for_status()
+        image_bytes = resp.content
+
+        await ensure_bucket()
+        object_key = f"generated/{uid}/{generation_id}.png"
+        await minio_client.put_object(
+            MINIO_BUCKET,
+            object_key,
+            io.BytesIO(image_bytes),
+            length=len(image_bytes),
+            content_type="image/png",
+        )
+        image_url = f"{MINIO_PUBLIC_BASE}/{object_key}"
+        img_status = "completed"
+        error_message = None
+    except Exception as e:
+        image_url = None
+        object_key = None
+        img_status = "failed"
+        error_message = str(e)
+
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """UPDATE image_generations
+               SET result_image_key=$1, status=$2, error_message=$3, completed_at=NOW()
+               WHERE id=$4""",
+            object_key, img_status, error_message, uuid.UUID(generation_id),
+        )
+
+    if img_status == "failed":
+        raise HTTPException(status_code=502, detail=f"Image generation failed: {error_message}")
+
+    return {
+        "generation_id": generation_id,
+        "conversation_id": body.conversation_id,
+        "image_url": image_url,
+        "status": img_status,
+    }
 
 
 # --- Frontend Serving ---

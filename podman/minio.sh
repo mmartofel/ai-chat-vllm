@@ -21,5 +21,6 @@ podman run -d --name ai-chat-minio \
   -c "minio server /data --console-address ':9001' &
       sleep 3 &&
       mc alias set local http://localhost:9000 admin admin123 &&
+      mc anonymous set download local/images &&
       mc mb --ignore-existing local/images &&
       wait"
