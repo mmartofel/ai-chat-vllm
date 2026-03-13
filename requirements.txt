@@ -6,3 +6,6 @@ ruff
 asyncpg
 bcrypt
 python-jose[cryptography]
+miniopy-async
+httpx
+python-multipart

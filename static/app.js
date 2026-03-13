@@ -16,6 +16,9 @@ createApp({
         const lastResponseMs = ref(null);
 
         // Auth state
+        const isImageLoading = ref(false);
+        const imageUploadRef = ref(null);
+
         const isAuthenticated = ref(false);
         const currentUser = ref('');
         const currentRole = ref('');
@@ -249,10 +252,118 @@ createApp({
             localStorage.removeItem(STORAGE_KEY);
         };
 
+        // --- Image functions ---
+
+        const sendImage = async (file) => {
+            if (isStreaming.value || isImageLoading.value) return;
+
+            const objectUrl = URL.createObjectURL(file);
+            const userMsg = {
+                role: 'user',
+                type: 'image',
+                url: objectUrl,
+                content: `[Image: ${file.name}]`,
+                durationMs: null,
+            };
+            messages.value.push(userMsg);
+            await nextTick();
+            scrollToBottom();
+
+            isImageLoading.value = true;
+            status.value = 'Analysing image...';
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('conversation_id', currentConvId.value);
+
+            let imageMinioUrl = null;
+            try {
+                const res = await fetch('/images/describe', {
+                    method: 'POST',
+                    body: formData,
+                });
+                if (res.status === 401) { isAuthenticated.value = false; return; }
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                imageMinioUrl = data.image_url ?? null;
+                messages.value.push({
+                    role: 'assistant',
+                    type: 'text',
+                    content: data.result_text,
+                    durationMs: null,
+                });
+            } catch (e) {
+                messages.value.push({
+                    role: 'assistant',
+                    type: 'text',
+                    content: `[Image analysis failed: ${e.message}]`,
+                    durationMs: null,
+                });
+            } finally {
+                isImageLoading.value = false;
+                status.value = 'Ready';
+                // Replace transient blob URL with permanent MinIO URL
+                userMsg.url = imageMinioUrl;
+                saveCurrentChat();
+                await nextTick();
+                scrollToBottom();
+            }
+        };
+
+        const generateImage = async (prompt) => {
+            messages.value.push({
+                role: 'user', type: 'text',
+                content: `/image ${prompt}`, durationMs: null,
+            });
+            isImageLoading.value = true;
+            status.value = 'Generating image…';
+            await nextTick();
+            scrollToBottom();
+
+            try {
+                const res = await fetch('/images/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        conversation_id: currentConvId.value,
+                        prompt,
+                        width: 512,
+                        height: 512,
+                    }),
+                });
+                if (res.status === 401) { isAuthenticated.value = false; return; }
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                messages.value.push({
+                    role: 'assistant', type: 'image',
+                    url: data.image_url, content: prompt, durationMs: null,
+                });
+            } catch (e) {
+                messages.value.push({
+                    role: 'assistant', type: 'text',
+                    content: `[Image generation failed: ${e.message}]`, durationMs: null,
+                });
+            } finally {
+                isImageLoading.value = false;
+                status.value = 'Ready';
+                saveCurrentChat();
+                await nextTick();
+                scrollToBottom();
+            }
+        };
+
         // --- Send message ---
 
         const sendMessage = async () => {
-            if (!userInput.value.trim() || isStreaming.value) return;
+            if (!userInput.value.trim() || isStreaming.value || isImageLoading.value) return;
+
+            if (userInput.value.trim().startsWith('/image ')) {
+                const prompt = userInput.value.trim().slice(7).trim();
+                if (!prompt) return;
+                resetTextarea();
+                await generateImage(prompt);
+                return;
+            }
 
             messages.value.push({ role: 'user', content: userInput.value });
             resetTextarea();
@@ -331,6 +442,7 @@ createApp({
             userInput, messages, isStreaming, status, textareaRef,
             sidebarOpen, conversations, currentConvId, serverInfo, lastResponseMs,
             isAuthenticated, currentUser, currentRole, loginForm, loginError, loginLoading,
+            isImageLoading, imageUploadRef, sendImage, generateImage,
             sendMessage, renderMarkdown, autoResize,
             newChat, loadConversation, deleteConversation, formatDate,
             login, logout
