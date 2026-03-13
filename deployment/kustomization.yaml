@@ -1,4 +1,5 @@
 resources:
+  - ./namespace/namespace-vllm-inference.yaml
   - ./postgres/configmap-postgres.yaml
   - ./postgres/deployment-postgres.yaml
   - ./postgres/service-postgres.yaml
