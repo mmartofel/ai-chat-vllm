@@ -1,0 +1,12 @@
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: chat-ui
+data:
+  LLM_MODEL: 'Qwen/Qwen2.5-7B-Instruct-AWQ'
+  LLM_API_URL: 'http://vllm.vllm-inference.svc.cluster.local:8000/v1'
+  LLM_API_KEY: 'dummy-key'
+  DB_URL: postgresql://admin:admin@chat-postgres.vllm-inference.svc.cluster.local:5432/aichat
+  JWT_SECRET: '5745bc5ec4bb357305a3cd10ebbde5fa873f30b6a0600b5dd4fd327a7c99c180'
+  JWT_EXPIRE_HOURS: '8'
+  COOKIE_SECURE: 'false'

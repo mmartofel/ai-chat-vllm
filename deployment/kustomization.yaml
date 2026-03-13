@@ -1,5 +1,8 @@
 resources:
-  - configmap-chat-ui.yaml
-  - deployment-chat-ui.yaml
-  - service-chat-ui.yaml
-  - routechat-ui.yaml
+  - ./postgres/configmap-postgres.yaml
+  - ./postgres/deployment-postgres.yaml
+  - ./postgres/service-postgres.yaml
+  - ./chat-ui/configmap-chat-ui.yaml
+  - ./chat-ui/deployment-chat-ui.yaml
+  - ./chat-ui/service-chat-ui.yaml
+  - ./chat-ui/route-chat-ui.yaml

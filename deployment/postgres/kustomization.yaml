@@ -1,0 +1,4 @@
+resources:
+- configmap-postgres.yaml
+- deployment-postgres.yaml
+- service-postgres.yaml

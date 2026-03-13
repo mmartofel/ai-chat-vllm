@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: chat-postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/name: chat-postgres
+    app.kubernetes.io/part-of: DATA_SUBSYSTEM
+    app.openshift.io/runtime: postgresql
+  name: chat-postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chat-postgres
+  template:
+    metadata:
+      labels:
+        app: chat-postgres
+    spec:
+      containers:
+      - name: chat-postgres
+        imagePullPolicy: IfNotPresent
+        image: registry.redhat.io/rhel10/postgresql-16:latest
+        ports:
+          - containerPort: 5432
+            protocol: TCP
+        envFrom:
+          - configMapRef:
+             name: postgres-setup-configmap
+        resources: {}
