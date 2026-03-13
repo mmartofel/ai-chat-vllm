@@ -30,6 +30,7 @@ logger = logging.getLogger("uvicorn.app")
 logger.warning(f"LLM_NAME = {MODEL_NAME}")
 logger.warning(f"LLM_API_URL = {API_BASE_URL}")
 logger.warning(f"LLM_API_KEY = {API_KEY}")
+logger.warning(f"DB_URL = {DB_URL}")
 
 # Initialize OpenAI Client
 client = AsyncOpenAI(base_url=API_BASE_URL, api_key=API_KEY)

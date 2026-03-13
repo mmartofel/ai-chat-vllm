@@ -1,0 +1,50 @@
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: chat-ui
+  labels:
+    app: chat-ui
+    app.kubernetes.io/component: vllm
+    app.kubernetes.io/name: chat-ui
+    app.kubernetes.io/part-of: CHAT_UI_SUBSYSTEM
+    app.openshift.io/runtime: python
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chat-ui
+  template:
+    metadata:
+      labels:
+        app: chat-ui
+    spec:
+      containers:
+      - name: container
+        image: 'quay.io/mmartofe/ai-chat:latest'
+        ports:
+        - containerPort: 8080
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: chat-ui
+        # livenessProbe:
+        #   httpGet:
+        #     path: /healthz
+        #     port: 8080
+        #   initialDelaySeconds: 30
+        #   periodSeconds: 30
+        #   timeoutSeconds: 5
+        # readinessProbe:
+        #   httpGet:
+        #     path: /healthz
+        #     port: 8080
+        #   initialDelaySeconds: 5
+        #   periodSeconds: 30
+        #   timeoutSeconds: 5
+        resources:
+          limits:
+            memory: "300Mi"
+            cpu: "0.3"
+          requests:
+            memory: "100Mi"
+            cpu: "0.1"

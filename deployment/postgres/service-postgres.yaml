@@ -1,0 +1,17 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: chat-postgres
+  labels:
+    app: chat-postgres
+    app.kubernetes.io/component: chat-postgres
+    app.kubernetes.io/instance: chat-postgres
+spec:
+  ports:
+  - name: 5432-tcp
+    port: 5432
+    targetPort: 5432
+  selector:
+    app: chat-postgres
+  type: ClusterIP
+  sessionAffinity: None
