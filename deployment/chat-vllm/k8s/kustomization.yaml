@@ -1,0 +1,13 @@
+# NOTE: The primary deploy method is ./deploy.sh (repo root), not `oc apply -k`.
+# deploy.sh sources user-values.env, renders ${VAR} placeholders via envsubst,
+# and creates the HF token secret imperatively (keeping credentials out of YAML).
+#
+# This kustomization.yaml is kept for reference. secret-hf-token.yaml has been
+# removed from the resources list — it is documentation only (see that file).
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - pvc-models.yaml
+  - deployment.yaml
+  - service.yaml
+  - route.yaml

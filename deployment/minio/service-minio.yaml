@@ -1,0 +1,20 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: chat-minio
+  labels:
+    app: chat-minio
+    app.kubernetes.io/component: chat-minio
+    app.kubernetes.io/instance: chat-minio
+spec:
+  ports:
+    - name: 9000-api
+      port: 9000
+      targetPort: 9000
+    - name: 9001-console
+      port: 9001
+      targetPort: 9001
+  selector:
+    app: chat-minio
+  type: ClusterIP
+  sessionAffinity: None

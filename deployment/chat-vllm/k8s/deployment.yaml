@@ -1,0 +1,181 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm
+  namespace: ${NAMESPACE}
+  labels:
+    app: vllm
+    app.kubernetes.io/component: vllm
+    app.kubernetes.io/name: vllm
+    app.kubernetes.io/part-of: VLLM_SUBSYSTEM
+    app.openshift.io/runtime: golang
+spec:
+  replicas: 1
+  # Recreate is required because the PVC is ReadWriteOnce — only one pod
+  # can mount it at a time. Rolling update would cause the new pod to
+  # get stuck waiting for the volume.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: vllm
+  template:
+    metadata:
+      labels:
+        app: vllm
+    spec:
+      serviceAccountName: vllm-sa
+      securityContext:
+        runAsUser: 0
+      # Using the RHAIIS image which does not carry the restrictive
+      # NVIDIA_REQUIRE_CUDA baked-in constraint that tops out at driver 570.x.
+      # The community vllm/vllm-openai image's constraint caused
+      # NVIDIA_VISIBLE_DEVICES=void on driver 580.x regardless of pod-spec
+      # overrides (the OCI hook reads it directly from the image config).
+      # RHAIIS image is compatible with driver 580.x so standard nvidia
+      # runtimeClassName works correctly.
+
+      # Kubernetes injects <SERVICE_NAME>_PORT=tcp://... env vars for every
+      # Service in the namespace. Because the Service is named "vllm", this
+      # produces VLLM_PORT=tcp://..., which collides with vLLM's own VLLM_PORT
+      # variable (expects a plain integer port). Disabling service links
+      # prevents all such injections.
+      enableServiceLinks: false
+
+      # Tolerate GPU taint so the pod is schedulable on GPU nodes.
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+      # ----------------------------------------------------------------
+      # Init container: download the model from Hugging Face Hub.
+      # Uses the same image as the server (already pulled) so no extra
+      # image pull is needed. The download is idempotent — if config.json
+      # already exists the container exits immediately.
+      # ----------------------------------------------------------------
+      initContainers:
+        - name: model-downloader
+          image: ${RHIIS_IMAGE}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              MODEL_DIR=${MODEL_PATH}
+              if [ -f "${MODEL_DIR}/config.json" ]; then
+                echo "Model already present at ${MODEL_DIR}, skipping download."
+                ls -alh ${MODEL_DIR}
+                exit 0
+              fi
+              echo "Downloading ${MODEL_ID} from Hugging Face Hub..."
+              huggingface-cli download ${MODEL_ID} \
+                --local-dir "${MODEL_DIR}" \
+                --local-dir-use-symlinks False
+              echo "Download complete."
+              ls -alh ${MODEL_DIR}
+          env:
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token-secret
+                  key: token
+            - name: HF_HOME
+              value: ${HF_DIR}/.hf-cache
+            - name: HF_HUB_OFFLINE
+              value: "0"
+          volumeMounts:
+            - name: models-cache
+              mountPath: ${HF_DIR}
+          resources:
+            requests:
+              cpu: "2"
+              memory: "2Gi"
+            limits:
+              cpu: "3"
+              memory: "3Gi"
+      # ----------------------------------------------------------------
+      # Main container: vLLM OpenAI-compatible server.
+      # Args mirror the configuration in docker.sh.
+      # ----------------------------------------------------------------
+      containers:
+        - name: server
+          image: ${RHIIS_IMAGE}
+          # RHAIIS image uses python -m entrypoint rather than the `vllm serve` CLI.
+          command: ["python", "-m", "vllm.entrypoints.openai.api_server"]
+          args:
+            - --model
+            - ${MODEL_PATH}
+            - --served-model-name
+            - ${MODEL_ID}
+            - --dtype
+            - auto
+            - --tensor-parallel-size
+            - "1"
+            - --max-num-seqs
+            - "128"
+            - --max-model-len
+            - "4096"
+            - --gpu-memory-utilization
+            - "0.9"
+            - --enforce-eager
+            # --trust-remote-code is a boolean flag (store_true); omitting it means false (the default).
+          env:
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: hf-token-secret
+                  key: token
+            - name: NVIDIA_DRIVER_CAPABILITIES
+              value: "compute,utility"
+          ports:
+            - name: http
+              containerPort: 8000
+              protocol: TCP
+          resources:
+            requests:
+              cpu: "0.5"
+              memory: "2Gi"
+            limits:
+              cpu: "2"
+              memory: "8Gi"
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: models-cache
+              mountPath: ${HF_DIR}
+            # Shared memory for PyTorch tensor operations across workers.
+            - name: shm
+              mountPath: /dev/shm
+          # startupProbe allows up to 12 minutes (24 × 30s) for the model
+          # to load before liveness/readiness checks begin.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 24
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            failureThreshold: 10
+            timeoutSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+            failureThreshold: 10
+            timeoutSeconds: 10
+      volumes:
+        - name: models-cache
+          persistentVolumeClaim:
+            claimName: vllm-models-cache
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 1Gi

@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chat-minio
+  labels:
+    app: chat-minio
+    app.kubernetes.io/component: storage
+    app.kubernetes.io/name: chat-minio
+    app.kubernetes.io/part-of: DATA_SUBSYSTEM
+    app.openshift.io/runtime: s2i
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chat-minio
+  template:
+    metadata:
+      labels:
+        app: chat-minio
+    spec:
+      containers:
+      - name: chat-minio
+        image: quay.io/minio/minio:latest
+        imagePullPolicy: IfNotPresent
+        args:
+          - server
+          - /data
+          - --console-address
+          - ":9001"
+        ports:
+          - name: api
+            containerPort: 9000
+            protocol: TCP
+          - name: console
+            containerPort: 9001
+            protocol: TCP
+        envFrom:
+          - configMapRef:
+              name: minio-configmap
+        volumeMounts:
+          - name: minio-data
+            mountPath: /data
+        resources:
+          limits:
+            memory: "512Mi"
+            cpu: "0.5"
+          requests:
+            memory: "256Mi"
+            cpu: "0.1"
+        livenessProbe:
+          httpGet:
+            path: /minio/health/live
+            port: 9000
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+        readinessProbe:
+          httpGet:
+            path: /minio/health/ready
+            port: 9000
+          initialDelaySeconds: 10
+          periodSeconds: 15
+          timeoutSeconds: 5
+      volumes:
+        - name: minio-data
+          persistentVolumeClaim:
+            claimName: minio-data

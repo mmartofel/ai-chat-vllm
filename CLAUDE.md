@@ -40,6 +40,9 @@ COOKIE_SECURE=false         # set true in production (HTTPS)
 
 # Vision model for image → text (local: moondream, production: llava-v1.6-mistral-7b)
 VISION_MODEL=moondream
+# Vision API (defaults to LLM_API_URL/LLM_API_KEY if not set)
+VISION_BASE_URL=http://localhost:11434/v1   # separate endpoint for vision model
+VISION_API_KEY=ollama
 
 # Text → image generation service (local: image_service/, production: GPU deployment)
 IMAGE_SERVICE_URL=http://localhost:8100

@@ -13,8 +13,8 @@ print(f"Loading {MODEL_ID} on CPU — first run downloads ~5 GB, subsequent star
 pipe = AutoPipelineForText2Image.from_pretrained(
     MODEL_ID, torch_dtype=torch.float32  # float32 required for CPU
 )
-pipe.set_progress_bar_config(disable=True)
 
+pipe.set_progress_bar_config(disable=True)
 
 class GenerateRequest(BaseModel):
     prompt: str
@@ -22,11 +22,9 @@ class GenerateRequest(BaseModel):
     height: int = 512
     steps: int = 4
 
-
 @app.get("/health")
 def health():
     return {"status": "ok", "model": MODEL_ID}
-
 
 @app.post("/generate")
 def generate(req: GenerateRequest):

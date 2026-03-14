@@ -31,6 +31,8 @@ JWT_SECRET = os.getenv("JWT_SECRET", "changeme-insecure-default-secret")
 JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "8"))
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 VISION_MODEL      = os.getenv("VISION_MODEL", "moondream")
+VISION_BASE_URL   = os.getenv("VISION_BASE_URL", os.getenv("LLM_API_URL", "http://localhost:11434/v1"))
+VISION_API_KEY    = os.getenv("VISION_API_KEY",  os.getenv("LLM_API_KEY",  "ollama"))
 IMAGE_SERVICE_URL = os.getenv("IMAGE_SERVICE_URL", "http://localhost:8100")
 MINIO_ENDPOINT    = os.getenv("MINIO_ENDPOINT", "http://localhost:9000")
 MINIO_ACCESS_KEY  = os.getenv("MINIO_ACCESS_KEY", "admin")
@@ -666,7 +668,7 @@ async def image_describe(
 
     # Call vision model via the same OpenAI-compatible API used for chat
     try:
-        vision_client = AsyncOpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+        vision_client = AsyncOpenAI(base_url=VISION_BASE_URL, api_key=VISION_API_KEY)
         response = await vision_client.chat.completions.create(
             model=VISION_MODEL,
             messages=[{
