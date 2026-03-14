@@ -1,9 +1,20 @@
-import io, os
+import asyncio
+import io
+import logging
+import os
+
 from fastapi import FastAPI
 from fastapi.responses import Response
 from pydantic import BaseModel
 import torch
 from diffusers import AutoPipelineForText2Image
+
+
+class _HealthFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "GET /health" not in record.getMessage()
+
+logging.getLogger("uvicorn.access").addFilter(_HealthFilter())
 
 app = FastAPI(title="Local Image Generation Service")
 
@@ -27,14 +38,17 @@ def health():
     return {"status": "ok", "model": MODEL_ID}
 
 @app.post("/generate")
-def generate(req: GenerateRequest):
-    image = pipe(
-        req.prompt,
-        num_inference_steps=req.steps,
-        guidance_scale=0.0,   # required for SDXL-Turbo
-        width=req.width,
-        height=req.height,
-    ).images[0]
+async def generate(req: GenerateRequest):
+    def _run():
+        return pipe(
+            req.prompt,
+            num_inference_steps=req.steps,
+            guidance_scale=0.0,   # required for SDXL-Turbo
+            width=req.width,
+            height=req.height,
+        ).images[0]
+
+    image = await asyncio.to_thread(_run)
     buf = io.BytesIO()
     image.save(buf, format="PNG")
     return Response(content=buf.getvalue(), media_type="image/png")
