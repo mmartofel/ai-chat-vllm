@@ -36,16 +36,18 @@ spec:
             mountPath: /app/.cache/huggingface
         resources:
           limits:
-            memory: "6Gi"
-            cpu: "4"
+            memory: "8Gi"
+            cpu: "2"
+            nvidia.com/gpu: "1"
           requests:
-            memory: "2Gi"
+            memory: "4Gi"
             cpu: "0.5"
+            nvidia.com/gpu: "1"
         livenessProbe:
           httpGet:
             path: /health
             port: 8100
-          initialDelaySeconds: 120
+          initialDelaySeconds: 60
           periodSeconds: 30
           timeoutSeconds: 10
           failureThreshold: 5
@@ -53,7 +55,7 @@ spec:
           httpGet:
             path: /health
             port: 8100
-          initialDelaySeconds: 60
+          initialDelaySeconds: 30
           periodSeconds: 15
           timeoutSeconds: 10
       volumes:

@@ -20,10 +20,13 @@ app = FastAPI(title="Local Image Generation Service")
 
 MODEL_ID = os.getenv("IMAGE_GEN_MODEL", "stabilityai/sdxl-turbo")
 
-print(f"Loading {MODEL_ID} on CPU — first run downloads ~5 GB, subsequent starts are fast...")
+device = "cuda" if torch.cuda.is_available() else "cpu"
+dtype = torch.float16 if device == "cuda" else torch.float32
+
+print(f"Loading {MODEL_ID} on {device.upper()} with {dtype}...")
 pipe = AutoPipelineForText2Image.from_pretrained(
-    MODEL_ID, torch_dtype=torch.float32  # float32 required for CPU
-)
+    MODEL_ID, torch_dtype=dtype
+).to(device)
 
 pipe.set_progress_bar_config(disable=True)
 
