@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: image-service
+  labels:
+    app: image-service
+    app.kubernetes.io/component: image-generation
+    app.kubernetes.io/name: image-service
+    app.kubernetes.io/part-of: ai-chat
+    app.openshift.io/runtime: python
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: image-service
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: image-service
+    spec:
+      containers:
+      - name: image-service
+        image: quay.io/mmartofe/ai-chat-image-service:latest
+        imagePullPolicy: Always
+        ports:
+          - name: http
+            containerPort: 8100
+            protocol: TCP
+        envFrom:
+          - configMapRef:
+              name: image-service
+        volumeMounts:
+          - name: model-cache
+            mountPath: /app/.cache/huggingface
+        resources:
+          limits:
+            memory: "6Gi"
+            cpu: "4"
+          requests:
+            memory: "2Gi"
+            cpu: "0.5"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8100
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8100
+          initialDelaySeconds: 60
+          periodSeconds: 15
+          timeoutSeconds: 10
+      volumes:
+        - name: model-cache
+          persistentVolumeClaim:
+            claimName: image-service-model-cache

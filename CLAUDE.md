@@ -159,6 +159,19 @@ Routes:
 
 First start downloads ~5 GB of model weights to `~/.cache/huggingface/`. Configure the main app to reach it via `IMAGE_SERVICE_URL` in `.env`. In production on OpenShift this is replaced by a GPU-backed `Deployment`.
 
+### OpenShift Deployment
+Manifests are in `deployment/image-service/`:
+- `configmap-image-service.yaml` — IMAGE_GEN_MODEL and HF_HOME env vars
+- `pvc-image-service.yaml` — 10 Gi PVC for Hugging Face model cache (avoids re-download on restart)
+- `deployment-image-service.yaml` — CPU deployment (Recreate strategy), resources 2–4 Gi RAM / 0.5–2 CPU
+- `service-image-service.yaml` — ClusterIP on port 8100
+- `route-image-service.yaml` — TLS edge-terminated public route
+
+Apply with the root kustomization:
+```
+oc apply -k deployment/
+```
+
 Local MinIO for development:
 ```bash
 ./podman/minio.sh

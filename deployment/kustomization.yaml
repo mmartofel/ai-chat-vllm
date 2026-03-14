@@ -12,3 +12,8 @@ resources:
   - ./chat-ui/deployment-chat-ui.yaml
   - ./chat-ui/service-chat-ui.yaml
   - ./chat-ui/route-chat-ui.yaml
+  - ./image-service/configmap-image-service.yaml
+  - ./image-service/pvc-image-service.yaml
+  - ./image-service/deployment-image-service.yaml
+  - ./image-service/service-image-service.yaml
+  - ./image-service/route-image-service.yaml

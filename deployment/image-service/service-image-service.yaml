@@ -1,0 +1,17 @@
+kind: Service
+apiVersion: v1
+metadata:
+  name: image-service
+  labels:
+    app: image-service
+    app.kubernetes.io/component: image-generation
+    app.kubernetes.io/instance: image-service
+spec:
+  ports:
+    - name: 8100-http
+      port: 8100
+      targetPort: 8100
+  selector:
+    app: image-service
+  type: ClusterIP
+  sessionAffinity: None

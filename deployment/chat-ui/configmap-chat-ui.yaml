@@ -14,7 +14,8 @@ data:
   VISION_MODEL: 'llava-hf/llava-1.5-7b-hf'
   VISION_BASE_URL: 'http://image-vllm.vllm-inference.svc.cluster.local:8000/v1'
   VISION_API_KEY: 'dummy-key'
-  IMAGE_SERVICE_URL: 'http://image-vllm.vllm-inference.svc.cluster.local:8000'
+  # Image generation model
+  IMAGE_SERVICE_URL: 'http://image-service.vllm-inference.svc.cluster.local:8100'
   # MinIO / S3 object storage
   MINIO_ENDPOINT: 'http://chat-minio.vllm-inference.svc.cluster.local:9000'
   MINIO_ACCESS_KEY: 'admin'

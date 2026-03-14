@@ -267,3 +267,9 @@ cd podman
 ```
 
 OpenShift deployment uses Kustomize (`deployment/kustomization.yaml`). Target namespace: `vllm-inference`. The container image is based on `quay.io/fedora/python-313-minimal` and published to `quay.io/mmartofe/ai-chat`.
+
+Deployed components:
+- **chat-ui** — main FastAPI app (`quay.io/mmartofe/ai-chat:latest`, port 8001)
+- **image-service** — CPU SDXL-Turbo image generation (`quay.io/mmartofe/ai-chat-image-service:latest`, port 8100); PVC `image-service-model-cache` (10 Gi) persists model weights across pod restarts
+- **minio** — object storage for uploaded and generated images
+- **postgres** — conversation and user persistence
