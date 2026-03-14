@@ -3,7 +3,7 @@ kind: Route
 metadata:
   name: chat-ui
   annotations:
-    haproxy.router.openshift.io/timeout: 600s
+    haproxy.router.openshift.io/timeout: 3600s
 spec:
   to:
     kind: Service
