@@ -724,7 +724,7 @@ async def image_generate(
         )
 
     try:
-        async with httpx.AsyncClient(timeout=600) as http:   # CPU can be slow
+        async with httpx.AsyncClient(timeout=3600) as http:   # CPU can be slow
             resp = await http.post(
                 f"{IMAGE_SERVICE_URL}/generate",
                 json={"prompt": body.prompt, "width": body.width, "height": body.height},

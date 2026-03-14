@@ -8,4 +8,6 @@ __pycache__/
 .DS_Store
 ideas
 user-values.env
+Dockerfile
+Archive.zip
 

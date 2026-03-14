@@ -1,0 +1,6 @@
+resources:
+  - configmap-image-service.yaml
+  - pvc-image-service.yaml
+  - deployment-image-service.yaml
+  - service-image-service.yaml
+  - route-image-service.yaml

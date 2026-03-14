@@ -1,0 +1,15 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: image-service
+  labels:
+    app: image-service
+spec:
+  to:
+    kind: Service
+    name: image-service
+  port:
+    targetPort: 8100-http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
