@@ -20,10 +20,14 @@ app = FastAPI(title="Local Image Generation Service")
 
 MODEL_ID = os.getenv("IMAGE_GEN_MODEL", "stabilityai/sdxl-turbo")
 
+logging.info(f"Using model: {MODEL_ID}")
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
 dtype = torch.float16 if device == "cuda" else torch.float32
 
-print(f"Loading {MODEL_ID} on {device.upper()} with {dtype}...")
+logging.info(f"Using device: {device.upper()} with dtype: {dtype}")
+
+logging.info(f"Loading {MODEL_ID} on {device.upper()} with {dtype}...")
 pipe = AutoPipelineForText2Image.from_pretrained(
     MODEL_ID, torch_dtype=dtype
 ).to(device)

@@ -36,12 +36,12 @@ spec:
             mountPath: /app/.cache/huggingface
         resources:
           limits:
-            memory: "8Gi"
-            cpu: "2"
+            memory: "16Gi"
+            cpu: "4"
             nvidia.com/gpu: "1"
           requests:
             memory: "4Gi"
-            cpu: "0.5"
+            cpu: "1"
             nvidia.com/gpu: "1"
         livenessProbe:
           httpGet:
