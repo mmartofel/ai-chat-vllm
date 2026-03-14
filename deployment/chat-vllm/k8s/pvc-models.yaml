@@ -1,0 +1,17 @@
+# Model storage PVC.
+# Qwen2.5-7B-Instruct-AWQ is ~5.6 GB weights + ~2-3 GB HF cache ≈ 9 GB total.
+# Size comes from PVC_SIZE in user-values.env. Increase to 50Gi+ if hosting multiple models.
+#
+# storageClassName is intentionally omitted to use the cluster default.
+# Set it explicitly if your cluster requires a specific class (e.g. ocs-storagecluster-ceph-rbd).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vllm-models-cache
+  namespace: ${NAMESPACE}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: ${PVC_SIZE}

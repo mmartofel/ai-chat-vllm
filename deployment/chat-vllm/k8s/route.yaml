@@ -1,0 +1,20 @@
+# OpenShift Route with TLS edge termination.
+# Leave spec.host empty — OpenShift auto-assigns a hostname based on the
+# cluster's wildcard domain (e.g. vllm-vllm-inference.apps.<cluster-domain>).
+# Set spec.host explicitly if you need a custom hostname.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: vllm
+  namespace: ${NAMESPACE}
+  labels:
+    app: vllm
+spec:
+  to:
+    kind: Service
+    name: vllm
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

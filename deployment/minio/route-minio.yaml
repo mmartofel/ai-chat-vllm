@@ -1,0 +1,31 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: chat-minio-api
+  labels:
+    app: chat-minio
+spec:
+  to:
+    kind: Service
+    name: chat-minio
+  port:
+    targetPort: 9000-api
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: chat-minio-console
+  labels:
+    app: chat-minio
+spec:
+  to:
+    kind: Service
+    name: chat-minio
+  port:
+    targetPort: 9001-console
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

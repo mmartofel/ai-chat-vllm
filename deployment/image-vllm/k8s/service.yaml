@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: image-vllm
+  namespace: ${NAMESPACE}
+  labels:
+    app: image-vllm
+spec:
+  type: ClusterIP
+  selector:
+    app: image-vllm
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP

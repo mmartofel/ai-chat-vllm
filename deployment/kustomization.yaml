@@ -3,6 +3,11 @@ resources:
   - ./postgres/configmap-postgres.yaml
   - ./postgres/deployment-postgres.yaml
   - ./postgres/service-postgres.yaml
+  - ./minio/configmap-minio.yaml
+  - ./minio/pvc-minio.yaml
+  - ./minio/deployment-minio.yaml
+  - ./minio/service-minio.yaml
+  - ./minio/route-minio.yaml
   - ./chat-ui/configmap-chat-ui.yaml
   - ./chat-ui/deployment-chat-ui.yaml
   - ./chat-ui/service-chat-ui.yaml

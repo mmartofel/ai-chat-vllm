@@ -10,3 +10,17 @@ data:
   JWT_SECRET: '5745bc5ec4bb357305a3cd10ebbde5fa873f30b6a0600b5dd4fd327a7c99c180'
   JWT_EXPIRE_HOURS: '8'
   COOKIE_SECURE: 'false'
+  # Image to text model
+  VISION_MODEL: 'llava-hf/llava-1.5-7b-hf'
+  VISION_BASE_URL: 'http://image-vllm.vllm-inference.svc.cluster.local:8000/v1'
+  VISION_API_KEY: 'dummy-key'
+  IMAGE_SERVICE_URL: 'http://image-vllm.vllm-inference.svc.cluster.local:8000'
+  # MinIO / S3 object storage
+  MINIO_ENDPOINT: 'http://chat-minio.vllm-inference.svc.cluster.local:9000'
+  MINIO_ACCESS_KEY: 'admin'
+  MINIO_SECRET_KEY: 'admin123'
+  MINIO_BUCKET: 'images'
+  # Public base URL returned to clients for viewing generated images
+  # Local:      http://localhost:9000/images  (bucket must be set to public)
+  # Production: https://<odf-route>/images  or a presigned URL base
+  MINIO_PUBLIC_BASE_URL: 'https://chat-minio-api-vllm-inference.apps.zenek.jv7fq.gcp.redhatworkshops.io/images'

@@ -1,0 +1,6 @@
+resources:
+- configmap-minio.yaml
+- pvc-minio.yaml
+- deployment-minio.yaml
+- service-minio.yaml
+- route-minio.yaml
