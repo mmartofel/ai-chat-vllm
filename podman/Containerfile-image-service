@@ -1,4 +1,4 @@
-FROM registry.redhat.io/rhaiis/vllm-cuda-rhel9:3.3.0
+FROM quay.io/fedora/python-312-minimal:latest
 
 WORKDIR /app
 

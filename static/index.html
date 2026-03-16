@@ -157,7 +157,7 @@
                                 {{ msg.role === 'user' ? 'You' : 'AI Model' }}
                             </div>
                             <template v-if="msg.type === 'image'">
-                                <img :src="msg.url" :alt="msg.content" class="rounded-lg max-w-full" style="max-height: 480px;" />
+                                <img :src="msg.url" :alt="msg.content" class="rounded-lg max-w-full" />
                                 <div class="text-xs mt-1 opacity-60">{{ msg.content }}</div>
                             </template>
                             <div v-else-if="msg.role === 'assistant'" class="prose prose-sm max-w-none" v-html="renderMarkdown(msg.content)"></div>

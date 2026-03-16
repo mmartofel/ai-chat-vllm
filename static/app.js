@@ -327,8 +327,8 @@ createApp({
                     body: JSON.stringify({
                         conversation_id: currentConvId.value,
                         prompt,
-                        width: 512,
-                        height: 512,
+                        width: 1024,
+                        height: 576,
                     }),
                 });
                 if (res.status === 401) { isAuthenticated.value = false; return; }
