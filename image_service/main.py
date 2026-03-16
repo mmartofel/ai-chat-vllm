@@ -52,8 +52,8 @@ pipe.set_progress_bar_config(disable=True)
 
 class GenerateRequest(BaseModel):
     prompt: str
-    width: int = 3584
-    height: int = 1836
+    width: int = 1024
+    height: int = 576
     steps: int = 6
 
 @app.get("/health")
