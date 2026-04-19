@@ -1,7 +1,9 @@
 fastapi
 uvicorn[standard]
-diffusers>=0.27.0,<0.30.0
-transformers
+# diffusers>=0.27.0,<0.30.0
+# transformers
+diffusers>=0.30.0
+transformers>=4.41.0
 accelerate
 torch
 numpy<2

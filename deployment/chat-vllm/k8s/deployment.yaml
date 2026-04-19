@@ -34,7 +34,7 @@ spec:
       # overrides (the OCI hook reads it directly from the image config).
       # RHAIIS image is compatible with driver 580.x so standard nvidia
       # runtimeClassName works correctly.
-
+      runtimeClassName: nvidia
       # Kubernetes injects <SERVICE_NAME>_PORT=tcp://... env vars for every
       # Service in the namespace. Because the Service is named "vllm", this
       # produces VLLM_PORT=tcp://..., which collides with vLLM's own VLLM_PORT
@@ -135,6 +135,7 @@ spec:
             requests:
               cpu: "0.5"
               memory: "2Gi"
+              nvidia.com/gpu: "1"
             limits:
               cpu: "2"
               memory: "8Gi"
