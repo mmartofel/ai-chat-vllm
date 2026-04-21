@@ -34,7 +34,12 @@ spec:
       # overrides (the OCI hook reads it directly from the image config).
       # RHAIIS image is compatible with driver 580.x so standard nvidia
       # runtimeClassName works correctly.
+      #
+      # BUG? - causes crun error
+      # Failed to create pod sandbox: rpc error: code = Unknown desc = failed to find runtime handler nvidia from runtime list map[crun:0xc0001b9880 runc:0xc0001b9500]
+      # reproduces on GCP, at AWS works fine. Possible crun version mismatch?
       runtimeClassName: nvidia
+      #
       # Kubernetes injects <SERVICE_NAME>_PORT=tcp://... env vars for every
       # Service in the namespace. Because the Service is named "vllm", this
       # produces VLLM_PORT=tcp://..., which collides with vLLM's own VLLM_PORT
@@ -56,6 +61,7 @@ spec:
       initContainers:
         - name: model-downloader
           image: ${RHIIS_IMAGE}
+          imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
             - -c
@@ -100,6 +106,7 @@ spec:
       containers:
         - name: server
           image: ${RHIIS_IMAGE}
+          imagePullPolicy: IfNotPresent
           # RHAIIS image uses python -m entrypoint rather than the `vllm serve` CLI.
           command: ["python", "-m", "vllm.entrypoints.openai.api_server"]
           args:

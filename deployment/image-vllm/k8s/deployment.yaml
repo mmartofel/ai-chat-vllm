@@ -56,6 +56,7 @@ spec:
       initContainers:
         - name: model-downloader
           image: ${RHIIS_IMAGE}
+          imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
             - -c
@@ -100,6 +101,7 @@ spec:
       containers:
         - name: server
           image: ${RHIIS_IMAGE}
+          imagePullPolicy: IfNotPresent
           # RHAIIS image uses python -m entrypoint rather than the `vllm serve` CLI.
           command: ["python", "-m", "vllm.entrypoints.openai.api_server"]
           args:
