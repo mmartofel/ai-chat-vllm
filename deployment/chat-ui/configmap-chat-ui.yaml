@@ -24,4 +24,5 @@ data:
   # Public base URL returned to clients for viewing generated images
   # Local:      http://localhost:9000/images  (bucket must be set to public)
   # Production: https://<odf-route>/images  or a presigned URL base
-  MINIO_PUBLIC_BASE_URL: 'https://chat-minio-api-vllm-inference.apps.zenek.jv7fq.gcp.redhatworkshops.io/images'
+  # Overridden at deploy time by deploy.sh (auto-discovers the MinIO route hostname)
+  MINIO_PUBLIC_BASE_URL: 'https://PLACEHOLDER-patched-by-deploy-sh/images'
