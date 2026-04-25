@@ -19,6 +19,11 @@ createApp({
         const isImageLoading = ref(false);
         const imageUploadRef = ref(null);
 
+        // RAG / documents
+        const documents    = ref([]);
+        const isIndexing   = ref(false);
+        const docUploadRef = ref(null);
+
         const isAuthenticated = ref(false);
         const currentUser = ref('');
         const currentRole = ref('');
@@ -402,9 +407,19 @@ createApp({
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
-                    messages.value[messages.value.length - 1].content += decoder.decode(value);
+                    assistantMsg.content += decoder.decode(value);
                     await nextTick();
                     scrollToBottom();
+                }
+
+                // Extract %%SOURCES%% footer appended by the RAG pipeline
+                const marker = '\n%%SOURCES%%';
+                const idx = assistantMsg.content.indexOf(marker);
+                if (idx !== -1) {
+                    try {
+                        assistantMsg.sources = JSON.parse(assistantMsg.content.slice(idx + marker.length));
+                    } catch (_) {}
+                    assistantMsg.content = assistantMsg.content.slice(0, idx);
                 }
             } catch (error) {
                 messages.value[messages.value.length - 1].content +=
@@ -421,6 +436,40 @@ createApp({
             }
         };
 
+        // --- Documents ---
+
+        const loadDocuments = async () => {
+            try {
+                const res = await fetch('/documents');
+                if (res.ok) documents.value = await res.json();
+            } catch (_) {}
+        };
+
+        const uploadDocument = async (file) => {
+            isIndexing.value = true;
+            status.value = `Indexing ${file.name}…`;
+            try {
+                const fd = new FormData();
+                fd.append('file', file);
+                const res = await fetch('/documents/upload', { method: 'POST', body: fd });
+                if (res.status === 401) { isAuthenticated.value = false; return; }
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                await loadDocuments();
+            } catch (e) {
+                status.value = `Index failed: ${e.message}`;
+            } finally {
+                isIndexing.value = false;
+                status.value = 'Ready';
+            }
+        };
+
+        const deleteDocument = async (id) => {
+            try {
+                await fetch(`/documents/${id}`, { method: 'DELETE' });
+                documents.value = documents.value.filter(d => d.id !== id);
+            } catch (_) {}
+        };
+
         // --- Init ---
 
         onMounted(async () => {
@@ -432,6 +481,7 @@ createApp({
                     currentUser.value = data.username;
                     currentRole.value = data.role || '';
                     await loadConversationsFromServer();
+                    await loadDocuments();
                     currentConvId.value = generateId();
                 }
             } catch (_) {}
@@ -448,6 +498,7 @@ createApp({
             sidebarOpen, conversations, currentConvId, serverInfo, lastResponseMs,
             isAuthenticated, currentUser, currentRole, loginForm, loginError, loginLoading,
             isImageLoading, imageUploadRef, sendImage, generateImage,
+            documents, isIndexing, docUploadRef, loadDocuments, uploadDocument, deleteDocument,
             sendMessage, renderMarkdown, autoResize,
             newChat, loadConversation, deleteConversation, formatDate,
             login, logout

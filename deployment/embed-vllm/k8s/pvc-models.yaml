@@ -1,0 +1,12 @@
+# nomic-embed-text-v1.5 is ~0.5 GB; 10 Gi gives plenty of room for the HF cache.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: embed-vllm-models-cache
+  namespace: ${NAMESPACE}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: ${PVC_SIZE}

@@ -9,3 +9,6 @@ python-jose[cryptography]
 miniopy-async
 httpx
 python-multipart
+pypdf
+python-docx
+qdrant-client

@@ -26,3 +26,10 @@ data:
   # Production: https://<odf-route>/images  or a presigned URL base
   # Overridden at deploy time by deploy.sh (auto-discovers the MinIO route hostname)
   MINIO_PUBLIC_BASE_URL: 'https://PLACEHOLDER-patched-by-deploy-sh/images'
+  # RAG / Embeddings
+  QDRANT_URL: 'http://qdrant.vllm-inference.svc.cluster.local:6333'
+  QDRANT_COLLECTION: 'documents'
+  EMBED_MODEL: 'nomic-ai/nomic-embed-text-v1.5'
+  EMBED_BASE_URL: 'http://embed-vllm.vllm-inference.svc.cluster.local:8000/v1'
+  EMBED_API_KEY: 'dummy-key'
+  EMBED_DIM: '768'
