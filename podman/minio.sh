@@ -1,6 +1,6 @@
 # Start MinIO from official image on podman.
 #
-
+# Bitnami image is used in dev.sh for local development, but it doesn't work well with podman on M1/M2 Macs. The official MinIO image from quay.io works fine on podman and is used here.
 # podman run -d --name minio \
 #  -e MINIO_ROOT_USER=admin \
 #  -e MINIO_ROOT_PASSWORD=admin123 \
@@ -9,6 +9,7 @@
 #  -p 9001:9001 \
 #  -v minio-data:/data \
 #  bitnami/minio:latest server /data --console-address ":9001"
+#
 
 podman run -d --name ai-chat-minio \
   -e MINIO_ROOT_USER=admin \
@@ -21,6 +22,6 @@ podman run -d --name ai-chat-minio \
   -c "minio server /data --console-address ':9001' &
       sleep 3 &&
       mc alias set local http://localhost:9000 admin admin123 &&
-      mc anonymous set download local/images &&
       mc mb --ignore-existing local/images &&
+      mc anonymous set download local/images &&
       wait"

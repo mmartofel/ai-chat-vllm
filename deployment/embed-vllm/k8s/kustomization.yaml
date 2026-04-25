@@ -1,0 +1,9 @@
+# NOTE: The primary deploy method is ./deploy.sh, not `oc apply -k`.
+# deploy.sh sources user-values.env, renders ${VAR} placeholders via envsubst,
+# and creates the HF token secret imperatively.
+resources:
+  - namespace.yaml
+  - serviceaccount.yaml
+  - pvc-models.yaml
+  - deployment.yaml
+  - service.yaml

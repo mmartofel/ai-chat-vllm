@@ -161,35 +161,169 @@
 
 /* ── Prose / Markdown ────────────────────────── */
 
+.prose {
+    max-width: none !important;
+    font-size: 0.875rem;
+    line-height: 1.75;
+    color: #1f2937;
+}
+
+/* Headings */
+.prose h1 { font-size: 1.45rem; font-weight: 700; margin: 1.1rem 0 0.5rem; line-height: 1.3; color: #111827; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.3rem; }
+.prose h2 { font-size: 1.2rem;  font-weight: 700; margin: 1rem 0 0.4rem;   line-height: 1.35; color: #111827; }
+.prose h3 { font-size: 1.05rem; font-weight: 600; margin: 0.85rem 0 0.35rem; color: #1f2937; }
+.prose h4 { font-size: 0.95rem; font-weight: 600; margin: 0.7rem 0 0.3rem;  color: #374151; }
+.prose h1:first-child, .prose h2:first-child, .prose h3:first-child { margin-top: 0; }
+
+/* Paragraphs */
+.prose p { margin: 0 0 0.7rem; }
+.prose p:last-child { margin-bottom: 0; }
+
+/* Lists */
+.prose ul { list-style: disc;    padding-left: 1.5rem; margin: 0.3rem 0 0.7rem; }
+.prose ol { list-style: decimal; padding-left: 1.5rem; margin: 0.3rem 0 0.7rem; }
+.prose li { margin-bottom: 0.2rem; }
+.prose li > ul, .prose li > ol { margin: 0.1rem 0 0.1rem; }
+.prose ul ul { list-style: circle; }
+.prose ul ul ul { list-style: square; }
+
+/* Emphasis */
+.prose strong { font-weight: 600; color: #111827; }
+.prose em     { font-style: italic; }
+
+/* Inline code */
+.prose :not(pre) > code {
+    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+    font-size: 0.82em;
+    background: #f3f4f6;
+    color: #be185d;
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+    font-weight: 500;
+    border: 1px solid #e5e7eb;
+}
+
+/* Code block container (wraps <pre>) */
+.code-block {
+    margin: 0.75rem 0;
+    border-radius: 0.6rem;
+    overflow: hidden;
+    border: 1px solid rgba(0,0,0,0.1);
+    background: #1a1b2e;
+}
+.code-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: #252638;
+    padding: 0.3rem 0.75rem;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    min-height: 2rem;
+}
+.code-lang-label {
+    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+    font-size: 0.7rem;
+    color: #94a3b8;
+    text-transform: lowercase;
+    letter-spacing: 0.04em;
+}
 .prose pre {
-    background: #1e1e1e !important;
-    color: #f8f8f2;
-    padding: 1rem;
-    border-radius: 0.5rem;
-    overflow-x: auto;
+    margin: 0 !important;
+    background: #1a1b2e !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    border: none !important;
     position: relative;
 }
-.prose code { color: #d63384; font-weight: bold; }
-.prose pre code { color: inherit; font-weight: normal; }
-.prose p { margin-bottom: 0.5rem; }
-.prose { max-width: none !important; }
+.prose pre code {
+    display: block;
+    padding: 0.9rem 1.1rem;
+    overflow-x: auto;
+    color: #e2e8f0;
+    background: transparent !important;
+    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+    font-size: 0.8rem;
+    line-height: 1.65;
+    font-weight: normal;
+    border: none !important;
+}
 
-/* ── Copy button (code blocks) ───────────────── */
+/* Blockquotes */
+.prose blockquote {
+    border-left: 3px solid #818cf8;
+    padding: 0.4rem 1rem;
+    margin: 0.6rem 0;
+    background: #eef2ff;
+    border-radius: 0 0.4rem 0.4rem 0;
+    color: #4b5563;
+    font-style: italic;
+}
+.prose blockquote p { margin: 0; }
+
+/* Tables */
+.prose table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.75rem 0;
+    font-size: 0.85em;
+    border-radius: 0.4rem;
+    overflow: hidden;
+    border: 1px solid #e2e8f0;
+}
+.prose thead th {
+    background: #f1f5f9;
+    font-weight: 600;
+    color: #374151;
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    border-bottom: 2px solid #e2e8f0;
+}
+.prose tbody td {
+    padding: 0.45rem 0.75rem;
+    border-bottom: 1px solid #f1f5f9;
+    color: #4b5563;
+}
+.prose tbody tr:last-child td { border-bottom: none; }
+.prose tbody tr:hover { background: #f9fafb; }
+
+/* Horizontal rules */
+.prose hr { border: none; border-top: 1px solid #e5e7eb; margin: 1rem 0; }
+
+/* Links */
+.prose a { color: #4f46e5; text-decoration: underline; text-underline-offset: 2px; }
+.prose a:hover { color: #4338ca; }
+
+/* ── Copy button (code block header) ─────────── */
 
 .copy-btn {
-    position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
     padding: 2px 8px;
     font-size: 0.68rem;
-    background: rgba(255, 255, 255, 0.1);
-    color: #aaa;
-    border: 1px solid rgba(255, 255, 255, 0.18);
+    background: rgba(255, 255, 255, 0.08);
+    color: #94a3b8;
+    border: 1px solid rgba(255, 255, 255, 0.14);
     border-radius: 4px;
     cursor: pointer;
     transition: background 0.15s, color 0.15s;
     font-family: inherit;
+    margin-left: auto;
 }
-.copy-btn:hover { background: rgba(255, 255, 255, 0.2); color: white; }
+.copy-btn:hover { background: rgba(255, 255, 255, 0.18); color: #e2e8f0; }
+
+/* ── Streaming cursor ────────────────────────── */
+
+.typing-cursor {
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    background: #4f46e5;
+    margin-left: 1px;
+    vertical-align: text-bottom;
+    border-radius: 1px;
+    animation: cursor-blink 0.9s step-start infinite;
+}
+@keyframes cursor-blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0; }
+}
 
 body { background-color: #f9f9f9; }

@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="style.css" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
@@ -100,6 +101,38 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- Knowledge Base -->
+                <div class="px-3 pt-4 pb-1 flex items-center justify-between">
+                    <span class="text-xs font-semibold text-gray-400 uppercase tracking-widest">Knowledge Base</span>
+                    <button @click="docUploadRef.click()"
+                            :disabled="isIndexing"
+                            class="p-1 text-gray-400 hover:text-indigo-400 disabled:opacity-40 transition-colors"
+                            title="Upload document (PDF, DOCX, TXT, MD)">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                    </button>
+                </div>
+                <input ref="docUploadRef" type="file" accept=".pdf,.docx,.txt,.md" class="hidden"
+                       @change="e => { if (e.target.files[0]) uploadDocument(e.target.files[0]); e.target.value=''; }" />
+                <div class="px-2 pb-3 space-y-1">
+                    <div v-if="isIndexing" class="text-xs text-indigo-400 px-2 py-1 animate-pulse">Indexing…</div>
+                    <div v-for="doc in documents" :key="doc.id"
+                         class="flex items-center justify-between px-2 py-1 rounded hover:bg-gray-700 group">
+                        <span class="truncate text-xs text-gray-300" :title="doc.filename">{{ doc.filename }}</span>
+                        <button @click="deleteDocument(doc.id)"
+                                class="hidden group-hover:flex text-gray-500 hover:text-red-400 ml-1 flex-shrink-0 transition-colors"
+                                title="Delete document">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                            </svg>
+                        </button>
+                    </div>
+                    <div v-if="documents.length === 0 && !isIndexing"
+                         class="text-xs text-gray-600 px-2 py-1">No documents yet</div>
+                </div>
             </aside>
 
             <!-- Main Panel -->
@@ -123,19 +156,19 @@
                         </span>
                         <span class="text-xs text-indigo-200">Welcome, {{ currentUser }}!</span>
                         <button @click="newChat"
-                                :disabled="isImageLoading || isStreaming"
+                                :disabled="isImageLoading || isStreaming || isIndexing"
                                 class="text-xs bg-indigo-500 hover:bg-indigo-400 px-3 py-1.5 rounded transition-colors flex items-center gap-1 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                                 title="Start new conversation">
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
                             New Chat
                         </button>
                         <a v-if="currentRole === 'admin'" href="/admin.html"
-                           :class="(isImageLoading || isStreaming) ? 'pointer-events-none opacity-50' : 'hover:bg-yellow-400'"
+                           :class="(isImageLoading || isStreaming || isIndexing) ? 'pointer-events-none opacity-50' : 'hover:bg-yellow-400'"
                            class="text-xs bg-yellow-500 px-3 py-1.5 rounded transition-colors font-medium text-white">
                           Admin
                         </a>
                         <button @click="logout"
-                                :disabled="isImageLoading || isStreaming"
+                                :disabled="isImageLoading || isStreaming || isIndexing"
                                 class="text-xs bg-red-500 hover:bg-red-400 px-3 py-1.5 rounded transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed">
                           Sign Out
                         </button>
@@ -160,10 +193,22 @@
                                 <img :src="msg.url" :alt="msg.content" class="rounded-lg max-w-full" />
                                 <div class="text-xs mt-1 opacity-60">{{ msg.content }}</div>
                             </template>
-                            <div v-else-if="msg.role === 'assistant'" class="prose prose-sm max-w-none" v-html="renderMarkdown(msg.content)"></div>
+                            <div v-else-if="msg.role === 'assistant'" class="prose prose-sm max-w-none" v-html="renderMarkdown(msg.content, isStreaming && index === messages.length - 1)"></div>
                             <div v-else class="whitespace-pre-wrap text-sm leading-relaxed">{{ msg.content }}</div>
                             <div v-if="msg.role === 'assistant' && msg.durationMs" class="msg-timing">
                                 ⏱ {{ (msg.durationMs / 1000).toFixed(1) }}s
+                            </div>
+                            <div v-if="msg.sources && msg.sources.length" class="mt-2 border-t border-gray-100 pt-2">
+                                <details class="text-xs text-gray-500">
+                                    <summary class="cursor-pointer hover:text-gray-700 select-none">
+                                        Sources ({{ msg.sources.length }})
+                                    </summary>
+                                    <div v-for="(s, i) in msg.sources" :key="i"
+                                         class="mt-1 pl-2 border-l-2 border-indigo-200">
+                                        <span class="font-medium text-indigo-600">{{ s.filename }}</span>
+                                        <p class="text-gray-400 mt-0.5 leading-snug">{{ s.excerpt }}…</p>
+                                    </div>
+                                </details>
                             </div>
                         </div>
                     </div>
@@ -189,11 +234,17 @@
                             class="hidden"
                             @change="e => { if (e.target.files[0]) sendImage(e.target.files[0]); e.target.value = ''; }"
                         />
-                        <!-- Upload button -->
+                        <!-- RAG active indicator -->
+                        <span v-if="documents.length > 0"
+                              class="flex-shrink-0 self-center text-xs font-medium text-indigo-400 whitespace-nowrap"
+                              title="RAG active — answers will use your documents">
+                            {{ documents.length }} doc{{ documents.length > 1 ? 's' : '' }}
+                        </span>
+                        <!-- Upload image button -->
                         <button
                             type="button"
                             class="flex-shrink-0 p-2 text-gray-400 hover:text-indigo-600 disabled:opacity-40 transition-colors"
-                            :disabled="isStreaming || isImageLoading"
+                            :disabled="isStreaming || isImageLoading || isIndexing"
                             @click="imageUploadRef.click()"
                             title="Upload image for analysis">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -209,14 +260,14 @@
                             placeholder="Type a message, or /image &lt;prompt&gt; to generate an image…"
                             rows="1"
                             class="w-full p-3 pr-12 rounded-2xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm transition-all resize-none overflow-hidden min-h-[52px] max-h-[200px] text-sm"
-                            :disabled="isStreaming"
+                            :disabled="isStreaming || isIndexing"
                             @input="autoResize"
                             @keydown.enter.exact.prevent="sendMessage"
                             autofocus
                         ></textarea>
                         <button type="submit"
                             class="absolute right-2 bottom-2.5 p-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 disabled:opacity-40 transition-colors"
-                            :disabled="!userInput.trim() || isStreaming">
+                            :disabled="!userInput.trim() || isStreaming || isIndexing">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
                         </button>
                     </form>

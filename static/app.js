@@ -1,5 +1,28 @@
 const { createApp, ref, nextTick, onMounted } = Vue;
 
+// Configure marked: GFM, soft line-breaks, and inline hljs highlighting
+marked.use({
+    gfm: true,
+    breaks: true,
+    renderer: {
+        code({ text, lang }) {
+            const validLang = lang && hljs.getLanguage(lang) ? lang : null;
+            let highlighted;
+            try {
+                highlighted = validLang
+                    ? hljs.highlight(text, { language: validLang, ignoreIllegals: true }).value
+                    : hljs.highlightAuto(text).value;
+            } catch (_) {
+                highlighted = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+            }
+            const langLabel = validLang
+                ? `<span class="code-lang-label">${validLang}</span>`
+                : '';
+            return `<div class="code-block"><div class="code-header">${langLabel}</div><pre><code class="hljs">${highlighted}</code></pre></div>`;
+        }
+    }
+});
+
 createApp({
     setup() {
         const userInput = ref('');
@@ -18,6 +41,11 @@ createApp({
         // Auth state
         const isImageLoading = ref(false);
         const imageUploadRef = ref(null);
+
+        // RAG / documents
+        const documents    = ref([]);
+        const isIndexing   = ref(false);
+        const docUploadRef = ref(null);
 
         const isAuthenticated = ref(false);
         const currentUser = ref('');
@@ -175,7 +203,12 @@ createApp({
 
         // --- UI helpers ---
 
-        const renderMarkdown = (text) => marked.parse(text);
+        const renderMarkdown = (text, cursor = false) => {
+            if (!text) return '';
+            const html = marked.parse(text);
+            const safe = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(html) : html;
+            return cursor ? safe + '<span class="typing-cursor"></span>' : safe;
+        };
 
         const scrollToBottom = () => {
             const container = document.getElementById('chat-container');
@@ -195,21 +228,23 @@ createApp({
             if (textareaRef.value) textareaRef.value.style.height = 'auto';
         };
 
-        // Add "Copy" buttons to code blocks rendered in the chat
+        // Add "Copy" buttons to code block headers rendered in the chat
         const addCopyButtons = () => {
-            document.querySelectorAll('pre:not([data-copy-added])').forEach(pre => {
-                pre.setAttribute('data-copy-added', 'true');
+            document.querySelectorAll('.code-block:not([data-copy-added])').forEach(block => {
+                block.setAttribute('data-copy-added', 'true');
+                const header = block.querySelector('.code-header');
+                const code = block.querySelector('code');
+                if (!header || !code) return;
                 const btn = document.createElement('button');
                 btn.textContent = 'Copy';
                 btn.className = 'copy-btn';
                 btn.onclick = () => {
-                    const code = pre.querySelector('code')?.innerText ?? pre.innerText;
-                    navigator.clipboard.writeText(code).then(() => {
+                    navigator.clipboard.writeText(code.innerText ?? '').then(() => {
                         btn.textContent = 'Copied!';
                         setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
                     });
                 };
-                pre.appendChild(btn);
+                header.appendChild(btn);
             });
         };
 
@@ -235,6 +270,7 @@ createApp({
                 currentRole.value = data.role || '';
                 loginForm.value = { username: '', password: '' };
                 await loadConversationsFromServer();
+                await loadDocuments();
                 currentConvId.value = generateId();
             } finally {
                 loginLoading.value = false;
@@ -283,13 +319,16 @@ createApp({
                     body: formData,
                 });
                 if (res.status === 401) { isAuthenticated.value = false; return; }
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.detail || `HTTP ${res.status}`);
+                }
                 const data = await res.json();
                 imageMinioUrl = data.image_url ?? null;
                 messages.value.push({
                     role: 'assistant',
                     type: 'text',
-                    content: data.result_text,
+                    content: data.result_text || '[No description returned from vision model]',
                     durationMs: null,
                 });
             } catch (e) {
@@ -337,7 +376,10 @@ createApp({
                     }),
                 });
                 if (res.status === 401) { isAuthenticated.value = false; return; }
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.detail || `HTTP ${res.status}`);
+                }
                 const data = await res.json();
                 messages.value.push({
                     role: 'assistant', type: 'image',
@@ -402,9 +444,19 @@ createApp({
                 while (true) {
                     const { done, value } = await reader.read();
                     if (done) break;
-                    messages.value[messages.value.length - 1].content += decoder.decode(value);
+                    assistantMsg.content += decoder.decode(value);
                     await nextTick();
                     scrollToBottom();
+                }
+
+                // Extract %%SOURCES%% footer appended by the RAG pipeline
+                const marker = '\n%%SOURCES%%';
+                const idx = assistantMsg.content.indexOf(marker);
+                if (idx !== -1) {
+                    try {
+                        assistantMsg.sources = JSON.parse(assistantMsg.content.slice(idx + marker.length));
+                    } catch (_) {}
+                    assistantMsg.content = assistantMsg.content.slice(0, idx);
                 }
             } catch (error) {
                 messages.value[messages.value.length - 1].content +=
@@ -416,9 +468,45 @@ createApp({
                 isStreaming.value = false;
                 status.value = 'Ready';
                 saveCurrentChat();
-                setTimeout(() => { hljs.highlightAll(); addCopyButtons(); }, 100);
+                setTimeout(() => { addCopyButtons(); }, 50);
                 textareaRef.value?.focus();
+                await nextTick();
+                scrollToBottom();
             }
+        };
+
+        // --- Documents ---
+
+        const loadDocuments = async () => {
+            try {
+                const res = await fetch('/documents');
+                if (res.ok) documents.value = await res.json();
+            } catch (_) {}
+        };
+
+        const uploadDocument = async (file) => {
+            isIndexing.value = true;
+            status.value = `Indexing ${file.name}…`;
+            try {
+                const fd = new FormData();
+                fd.append('file', file);
+                const res = await fetch('/documents/upload', { method: 'POST', body: fd });
+                if (res.status === 401) { isAuthenticated.value = false; return; }
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                await loadDocuments();
+            } catch (e) {
+                status.value = `Index failed: ${e.message}`;
+            } finally {
+                isIndexing.value = false;
+                status.value = 'Ready';
+            }
+        };
+
+        const deleteDocument = async (id) => {
+            try {
+                await fetch(`/documents/${id}`, { method: 'DELETE' });
+                documents.value = documents.value.filter(d => d.id !== id);
+            } catch (_) {}
         };
 
         // --- Init ---
@@ -432,6 +520,7 @@ createApp({
                     currentUser.value = data.username;
                     currentRole.value = data.role || '';
                     await loadConversationsFromServer();
+                    await loadDocuments();
                     currentConvId.value = generateId();
                 }
             } catch (_) {}
@@ -448,6 +537,7 @@ createApp({
             sidebarOpen, conversations, currentConvId, serverInfo, lastResponseMs,
             isAuthenticated, currentUser, currentRole, loginForm, loginError, loginLoading,
             isImageLoading, imageUploadRef, sendImage, generateImage,
+            documents, isIndexing, docUploadRef, loadDocuments, uploadDocument, deleteDocument,
             sendMessage, renderMarkdown, autoResize,
             newChat, loadConversation, deleteConversation, formatDate,
             login, logout

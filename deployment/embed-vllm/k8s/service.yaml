@@ -1,14 +1,14 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: model-vllm
+  name: embed-vllm
   namespace: ${NAMESPACE}
   labels:
-    app: model-vllm
+    app: embed-vllm
 spec:
   type: ClusterIP
   selector:
-    app: model-vllm
+    app: embed-vllm
   ports:
     - name: http
       port: 8000

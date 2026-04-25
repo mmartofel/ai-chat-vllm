@@ -17,3 +17,7 @@ resources:
   - ./image-service/deployment-image-service.yaml
   - ./image-service/service-image-service.yaml
   - ./image-service/route-image-service.yaml
+  - ./qdrant/serviceaccount-qdrant.yaml
+  - ./qdrant/pvc-qdrant.yaml
+  - ./qdrant/deployment-qdrant.yaml
+  - ./qdrant/service-qdrant.yaml

@@ -10,6 +10,8 @@ from datetime import datetime, timedelta, timezone
 import asyncpg
 import bcrypt
 import httpx
+import pypdf
+import docx as _docx
 from fastapi import Cookie, Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,6 +21,12 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel
 from typing import Optional
 from dotenv import load_dotenv
+from qdrant_client import AsyncQdrantClient
+from qdrant_client.models import (
+    Distance, VectorParams, PointStruct,
+    Filter, FieldCondition, MatchValue,
+    FilterSelector,
+)
 
 # Load env vars if present
 load_dotenv()
@@ -40,6 +48,12 @@ MINIO_ACCESS_KEY  = os.getenv("MINIO_ACCESS_KEY", "admin")
 MINIO_SECRET_KEY  = os.getenv("MINIO_SECRET_KEY", "admin123")
 MINIO_BUCKET      = os.getenv("MINIO_BUCKET", "images")
 MINIO_PUBLIC_BASE = os.getenv("MINIO_PUBLIC_BASE_URL", "http://localhost:9000/images")
+QDRANT_URL        = os.getenv("QDRANT_URL",       "http://localhost:6333")
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "documents")
+EMBED_MODEL       = os.getenv("EMBED_MODEL",       "nomic-ai/nomic-embed-text-v1.5")
+EMBED_BASE_URL    = os.getenv("EMBED_BASE_URL",    "http://localhost:8001/v1")
+EMBED_API_KEY     = os.getenv("EMBED_API_KEY",     "dummy-key")
+EMBED_DIM         = int(os.getenv("EMBED_DIM",     "768"))
 
 logger = logging.getLogger("uvicorn.app")
 logger.warning(f"LLM_NAME = {MODEL_NAME}")
@@ -57,6 +71,10 @@ minio_client = Minio(
     secret_key=MINIO_SECRET_KEY,
     secure=MINIO_ENDPOINT.startswith("https://"),
 )
+
+# RAG clients (initialized at module level; Qdrant collection ensured at startup)
+qdrant  = AsyncQdrantClient(url=QDRANT_URL)
+embed_client = AsyncOpenAI(base_url=EMBED_BASE_URL, api_key=EMBED_API_KEY)
 
 # --- RBAC ---
 
@@ -127,6 +145,20 @@ CREATE TABLE IF NOT EXISTS image_generations (
 );
 CREATE INDEX IF NOT EXISTS idx_image_gen_conversation ON image_generations(conversation_id);
 CREATE INDEX IF NOT EXISTS idx_image_gen_user         ON image_generations(user_id);
+
+CREATE TABLE IF NOT EXISTS documents (
+    id            UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id       INTEGER      NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    filename      TEXT         NOT NULL,
+    file_type     VARCHAR(10)  NOT NULL,
+    file_key      TEXT         NOT NULL,
+    chunk_count   INTEGER      NOT NULL DEFAULT 0,
+    status        VARCHAR(20)  NOT NULL DEFAULT 'processing'
+                               CHECK (status IN ('processing', 'ready', 'failed')),
+    error_message TEXT,
+    created_at    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_documents_user ON documents(user_id);
 """
 
 
@@ -135,7 +167,7 @@ async def init_db(pool: asyncpg.Pool):
         await conn.execute(INIT_SQL)
 
         # Log database connection and seeding info
-        logger.warning("Connecting to database ...")
+        logger.info("Connecting to PostgreSQL database to initialize ...")
 
         # Seed permissions
         for perm in ("chat", "manage_users", "manage_roles", "moderate_content"):
@@ -237,11 +269,26 @@ def require_permission(perm: str):
 
 # --- Lifespan ---
 
+async def ensure_qdrant_collection():
+    try:
+        existing = await qdrant.get_collections()
+        names = [c.name for c in existing.collections]
+        if QDRANT_COLLECTION not in names:
+            await qdrant.create_collection(
+                collection_name=QDRANT_COLLECTION,
+                vectors_config=VectorParams(size=EMBED_DIM, distance=Distance.COSINE),
+            )
+        logger.info(f"Qdrant init completed, collection '{QDRANT_COLLECTION}' is ready")
+    except Exception as e:
+        logger.warning(f"Qdrant init skipped (will retry on first use): {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     pool = await asyncpg.create_pool(DB_URL)
     app.state.db = pool
     await init_db(pool)
+    await ensure_qdrant_collection()
     yield
     await pool.close()
 
@@ -295,20 +342,137 @@ class ImageGenerateRequest(BaseModel):
     previous_image_url: Optional[str] = None
 
 
-# --- Streaming ---
+class DocumentUploadResponse(BaseModel):
+    id: str
+    filename: str
+    chunk_count: int
+    status: str
 
-async def stream_generator(messages, model):
+
+# --- RAG helpers ---
+
+def extract_text(file_bytes: bytes, file_type: str) -> str:
+    if file_type == "pdf":
+        reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+        return "\n".join(p.extract_text() or "" for p in reader.pages)
+    if file_type == "docx":
+        doc = _docx.Document(io.BytesIO(file_bytes))
+        return "\n".join(p.text for p in doc.paragraphs)
+    return file_bytes.decode("utf-8", errors="replace")
+
+
+def chunk_text(text: str, size: int = 400, overlap: int = 50) -> list[str]:
+    words = text.split()
+    chunks, start = [], 0
+    while start < len(words):
+        end = min(start + size, len(words))
+        chunks.append(" ".join(words[start:end]))
+        if end == len(words):
+            break
+        start += size - overlap
+    return [c for c in chunks if c.strip()]
+
+
+async def condense_query(messages: list) -> str:
+    if len(messages) <= 1:
+        last = messages[-1] if messages else {}
+        return str(last.get("content", ""))
+    history = "\n".join(
+        f"{m['role'].upper()}: {m.get('content', '')}"
+        for m in messages[-7:-1]
+    )
+    latest = str(messages[-1].get("content", ""))
+    resp = await client.chat.completions.create(
+        model=MODEL_NAME,
+        messages=[{"role": "user", "content":
+            f"Conversation so far:\n{history}\n\n"
+            f"Rewrite this message as a self-contained search query "
+            f"(no explanation, just the query): {latest}"
+        }],
+        max_tokens=80,
+        temperature=0,
+    )
+    return resp.choices[0].message.content.strip()
+
+
+async def stream_with_sources(messages, model, sources):
     try:
         stream = await client.chat.completions.create(
-            model=model,
-            messages=messages,
-            stream=True
+            model=model, messages=messages, stream=True
         )
         async for chunk in stream:
-            if chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
+        if sources:
+            yield f"\n%%SOURCES%%{json.dumps(sources)}"
     except Exception as e:
-        yield f"\n\n[Error: {str(e)}]"
+        yield f"\n\n[Error: {e}]"
+
+
+# --- Streaming ---
+
+# --- Chat route ---
+
+@app.post("/chat")
+async def chat_endpoint(
+    body: ChatRequest,
+    request: Request,
+    user: dict = Depends(require_permission("chat")),
+):
+    pool: asyncpg.Pool = request.app.state.db
+    async with pool.acquire() as conn:
+        uid = await get_user_id(conn, user["username"])
+
+    messages = list(body.messages)
+    sources  = []
+
+    try:
+        doc_count = await qdrant.count(
+            collection_name=QDRANT_COLLECTION,
+            count_filter=Filter(must=[
+                FieldCondition(key="user_id", match=MatchValue(value=uid))
+            ]),
+        )
+        if doc_count.count > 0 and messages:
+            condensed  = await condense_query(messages)
+            embed_resp = await embed_client.embeddings.create(
+                model=EMBED_MODEL, input=[condensed]
+            )
+            query_vec  = embed_resp.data[0].embedding
+            _rag_resp  = await qdrant.query_points(
+                collection_name=QDRANT_COLLECTION,
+                query=query_vec,
+                query_filter=Filter(must=[
+                    FieldCondition(key="user_id", match=MatchValue(value=uid))
+                ]),
+                limit=3,
+                score_threshold=0.3,
+            )
+            hits = _rag_resp.points
+            logger.info(f"RAG: query='{condensed[:80]}' hits={len(hits)} scores={[round(h.score,3) for h in hits]}")
+            if hits:
+                context  = "\n\n---\n".join(h.payload["text"] for h in hits)
+                messages = [{
+                    "role": "system",
+                    "content": (
+                        "Answer using the document context below. "
+                        "If it is not relevant, use your general knowledge.\n\n"
+                        + context
+                    ),
+                }] + messages
+                sources = [
+                    {"filename": h.payload["filename"],
+                     "excerpt":  h.payload["text"][:200]}
+                    for h in hits
+                ]
+    except Exception as rag_err:
+        logger.warning(f"RAG retrieval failed: {rag_err}")  # RAG failure must never break chat
+
+    return StreamingResponse(
+        stream_with_sources(messages, body.model, sources),
+        media_type="text/plain",
+    )
 
 
 # --- Auth routes ---
@@ -351,14 +515,6 @@ async def me(user: dict = Depends(get_current_user)):
 
 
 # --- API routes ---
-
-@app.post("/chat")
-async def chat_endpoint(request: ChatRequest, user: dict = Depends(require_permission("chat"))):
-    return StreamingResponse(
-        stream_generator(request.messages, request.model),
-        media_type="text/plain"
-    )
-
 
 @app.get("/health")
 async def health_check():
@@ -688,10 +844,13 @@ async def image_describe(
                 ],
             }],
         )
-        result_text = response.choices[0].message.content
+        raw = response.choices[0].message.content
+        logger.info(f"Vision ({VISION_MODEL}): content={repr(raw[:120] if raw else raw)}")
+        result_text = raw or "[Vision model returned no description — check VISION_MODEL and VISION_BASE_URL]"
         img_status = "completed"
         error_message = None
     except Exception as e:
+        logger.warning(f"Vision ({VISION_MODEL}) failed: {e}")
         result_text = f"[Image analysis failed: {e}]"
         img_status = "failed"
         error_message = str(e)
@@ -802,7 +961,10 @@ async def image_generate(
         )
 
     if img_status == "failed":
-        raise HTTPException(status_code=502, detail=f"Image generation failed: {error_message}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Image generation service unavailable ({IMAGE_SERVICE_URL}): {error_message}",
+        )
 
     return {
         "generation_id": generation_id,
@@ -810,6 +972,126 @@ async def image_generate(
         "image_url": image_url,
         "status": img_status,
     }
+
+
+# --- Documents / RAG routes ---
+
+@app.post("/documents/upload", response_model=DocumentUploadResponse)
+async def document_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    user: dict = Depends(require_permission("chat")),
+):
+    allowed = {"pdf", "docx", "txt", "md"}
+    ext = (file.filename or "").rsplit(".", 1)[-1].lower()
+    if ext not in allowed:
+        raise HTTPException(400, f"Unsupported file type: .{ext}")
+
+    pool: asyncpg.Pool = request.app.state.db
+    file_bytes = await file.read()
+    doc_id = str(uuid.uuid4())
+
+    async with pool.acquire() as conn:
+        uid = await get_user_id(conn, user["username"])
+        file_key = f"documents/{uid}/{doc_id}.{ext}"
+        await ensure_bucket()
+        await minio_client.put_object(
+            MINIO_BUCKET, file_key,
+            io.BytesIO(file_bytes), length=len(file_bytes),
+            content_type=file.content_type or "application/octet-stream",
+        )
+        await conn.execute(
+            """INSERT INTO documents (id, user_id, filename, file_type, file_key, status)
+               VALUES ($1, $2, $3, $4, $5, 'processing')""",
+            uuid.UUID(doc_id), uid, file.filename, ext, file_key,
+        )
+
+    try:
+        text   = extract_text(file_bytes, ext)
+        chunks = chunk_text(text)
+        if not chunks:
+            raise ValueError("No text extracted from document")
+
+        embed_resp = await embed_client.embeddings.create(
+            model=EMBED_MODEL, input=chunks
+        )
+        vectors = [e.embedding for e in embed_resp.data]
+
+        points = [
+            PointStruct(
+                id=str(uuid.uuid4()),
+                vector=vec,
+                payload={
+                    "document_id": doc_id,
+                    "user_id":     uid,
+                    "chunk_index": i,
+                    "text":        chunk,
+                    "filename":    file.filename,
+                },
+            )
+            for i, (vec, chunk) in enumerate(zip(vectors, chunks))
+        ]
+        await qdrant.upsert(collection_name=QDRANT_COLLECTION, points=points)
+
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE documents SET chunk_count=$1, status='ready' WHERE id=$2",
+                len(chunks), uuid.UUID(doc_id),
+            )
+    except Exception as e:
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE documents SET status='failed', error_message=$1 WHERE id=$2",
+                str(e), uuid.UUID(doc_id),
+            )
+        raise HTTPException(500, f"Processing failed: {e}")
+
+    return DocumentUploadResponse(
+        id=doc_id, filename=file.filename, chunk_count=len(chunks), status="ready"
+    )
+
+
+@app.get("/documents")
+async def list_documents(
+    request: Request,
+    user: dict = Depends(require_permission("chat")),
+):
+    pool: asyncpg.Pool = request.app.state.db
+    async with pool.acquire() as conn:
+        uid  = await get_user_id(conn, user["username"])
+        rows = await conn.fetch(
+            """SELECT id, filename, file_type, chunk_count, status, created_at
+               FROM documents WHERE user_id=$1 ORDER BY created_at DESC""",
+            uid,
+        )
+    return [dict(r) for r in rows]
+
+
+@app.delete("/documents/{doc_id}", status_code=204)
+async def delete_document(
+    doc_id: str,
+    request: Request,
+    user: dict = Depends(require_permission("chat")),
+):
+    pool: asyncpg.Pool = request.app.state.db
+    async with pool.acquire() as conn:
+        uid = await get_user_id(conn, user["username"])
+        row = await conn.fetchrow(
+            "SELECT id FROM documents WHERE id=$1 AND user_id=$2",
+            uuid.UUID(doc_id), uid,
+        )
+        if not row:
+            raise HTTPException(404, "Document not found")
+        await conn.execute("DELETE FROM documents WHERE id=$1", uuid.UUID(doc_id))
+
+    await qdrant.delete(
+        collection_name=QDRANT_COLLECTION,
+        points_selector=FilterSelector(
+            filter=Filter(must=[
+                FieldCondition(key="document_id", match=MatchValue(value=doc_id))
+            ])
+        ),
+    )
 
 
 # --- Frontend Serving ---

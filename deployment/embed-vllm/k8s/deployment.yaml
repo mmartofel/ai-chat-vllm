@@ -1,63 +1,30 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: model-vllm
+  name: embed-vllm
   namespace: ${NAMESPACE}
   labels:
-    app: model-vllm
-    app.kubernetes.io/component: model-vllm
-    app.kubernetes.io/name: model-vllm
-    app.kubernetes.io/part-of: VLLM_SUBSYSTEM
+    app: embed-vllm
+    app.kubernetes.io/component: embed-vllm
+    app.kubernetes.io/name: embed-vllm
+    app.kubernetes.io/part-of: RAG_SUBSYSTEM
     app.openshift.io/runtime: golang
 spec:
   replicas: 1
-  # Recreate is required because the PVC is ReadWriteOnce — only one pod
-  # can mount it at a time. Rolling update would cause the new pod to
-  # get stuck waiting for the volume.
   strategy:
     type: Recreate
   selector:
     matchLabels:
-      app: model-vllm
+      app: embed-vllm
   template:
     metadata:
       labels:
-        app: model-vllm
+        app: embed-vllm
     spec:
-      serviceAccountName: model-vllm-sa
+      serviceAccountName: embed-vllm-sa
       securityContext:
         runAsUser: 0
-      # Using the RHAIIS image which does not carry the restrictive
-      # NVIDIA_REQUIRE_CUDA baked-in constraint that tops out at driver 570.x.
-      # The community vllm/vllm-openai image's constraint caused
-      # NVIDIA_VISIBLE_DEVICES=void on driver 580.x regardless of pod-spec
-      # overrides (the OCI hook reads it directly from the image config).
-      # RHAIIS image is compatible with driver 580.x so standard nvidia
-      # runtimeClassName works correctly.
-      #
-      # BUG? - causes crun error
-      # Failed to create pod sandbox: rpc error: code = Unknown desc = failed to find runtime handler nvidia from runtime list map[crun:0xc0001b9880 runc:0xc0001b9500]
-      # reproduces on GCP, at AWS works fine. Possible crun version mismatch?
-      runtimeClassName: nvidia
-      #
-      # Kubernetes injects <SERVICE_NAME>_PORT=tcp://... env vars for every
-      # Service in the namespace. Because the Service is named "model-vllm", this
-      # produces MODEL_VLLM_PORT=tcp://..., which collides with vLLM's own VLLM_PORT
-      # variable (expects a plain integer port). Disabling service links
-      # prevents all such injections.
       enableServiceLinks: false
-
-      # Tolerate GPU taint so the pod is schedulable on GPU nodes.
-      tolerations:
-        - key: "nvidia.com/gpu"
-          operator: "Exists"
-          effect: "NoSchedule"
-      # ----------------------------------------------------------------
-      # Init container: download the model from Hugging Face Hub.
-      # Uses the same image as the server (already pulled) so no extra
-      # image pull is needed. The download is idempotent — if config.json
-      # already exists the container exits immediately.
-      # ----------------------------------------------------------------
       initContainers:
         - name: model-downloader
           image: ${RHIIS_IMAGE}
@@ -94,46 +61,36 @@ spec:
               mountPath: ${HF_DIR}
           resources:
             requests:
+              cpu: "1"
+              memory: "1Gi"
+            limits:
               cpu: "2"
               memory: "2Gi"
-            limits:
-              cpu: "3"
-              memory: "3Gi"
-      # ----------------------------------------------------------------
-      # Main container: vLLM OpenAI-compatible server.
-      # Args mirror the configuration in docker.sh.
-      # ----------------------------------------------------------------
       containers:
         - name: server
           image: ${RHIIS_IMAGE}
-          imagePullPolicy: Always
-          # RHAIIS image uses python -m entrypoint rather than the `vllm serve` CLI.
+          imagePullPolicy: IfNotPresent
           command: ["python", "-m", "vllm.entrypoints.openai.api_server"]
           args:
             - --model
             - ${MODEL_PATH}
             - --served-model-name
             - ${MODEL_ID}
+            - --task
+            - embed
             - --dtype
             - auto
-            - --tensor-parallel-size
-            - "1"
             - --max-num-seqs
-            - "128"
+            - "64"
             - --max-model-len
-            - "4096"
-            - --gpu-memory-utilization
-            - "0.9"
+            - "8192"
             - --enforce-eager
-            # --trust-remote-code is a boolean flag (store_true); omitting it means false (the default).
           env:
             - name: HUGGING_FACE_HUB_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: hf-token-secret
                   key: token
-            - name: NVIDIA_DRIVER_CAPABILITIES
-              value: "compute,utility"
           ports:
             - name: http
               containerPort: 8000
@@ -142,19 +99,14 @@ spec:
             requests:
               cpu: "0.5"
               memory: "2Gi"
-              nvidia.com/gpu: "1"
             limits:
               cpu: "2"
-              memory: "8Gi"
-              nvidia.com/gpu: "1"
+              memory: "4Gi"
           volumeMounts:
             - name: models-cache
               mountPath: ${HF_DIR}
-            # Shared memory for PyTorch tensor operations across workers.
             - name: shm
               mountPath: /dev/shm
-          # startupProbe allows up to 12 minutes (24 × 30s) for the model
-          # to load before liveness/readiness checks begin.
           startupProbe:
             httpGet:
               path: /health
@@ -182,8 +134,8 @@ spec:
       volumes:
         - name: models-cache
           persistentVolumeClaim:
-            claimName: model-vllm-models-cache
+            claimName: embed-vllm-models-cache
         - name: shm
           emptyDir:
             medium: Memory
-            sizeLimit: 1Gi
+            sizeLimit: 512Mi

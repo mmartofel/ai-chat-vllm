@@ -3,10 +3,19 @@
 
 oc new-project vllm-inference
 
+# Grant anyuid SCC to the qdrant service account so the pod can run as UID 1000
+# (Qdrant's official image requires a fixed UID for storage ownership)
+oc adm policy add-scc-to-user anyuid \
+  -z qdrant \
+  -n vllm-inference
+
 cd deployment/chat-vllm
 ./deploy.sh
 
 cd ../image-vllm
+./deploy.sh
+
+cd ../embed-vllm
 ./deploy.sh
 
 cd ../..
