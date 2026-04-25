@@ -106,7 +106,7 @@ spec:
       containers:
         - name: server
           image: ${RHIIS_IMAGE}
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           # RHAIIS image uses python -m entrypoint rather than the `vllm serve` CLI.
           command: ["python", "-m", "vllm.entrypoints.openai.api_server"]
           args:

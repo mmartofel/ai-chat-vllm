@@ -6,7 +6,7 @@ metadata:
     app: image-service
     app.kubernetes.io/component: image-generation
     app.kubernetes.io/name: image-service
-    app.kubernetes.io/part-of: ai-chat
+    app.kubernetes.io/part-of: IMAGE_SERVICES_SUBSYSTEM
     app.openshift.io/runtime: python
 spec:
   replicas: 1
@@ -23,7 +23,7 @@ spec:
       containers:
       - name: image-service
         image: quay.io/mmartofe/ai-chat-image-service:latest
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         ports:
           - name: http
             containerPort: 8100
