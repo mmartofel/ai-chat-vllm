@@ -167,7 +167,7 @@ async def init_db(pool: asyncpg.Pool):
         await conn.execute(INIT_SQL)
 
         # Log database connection and seeding info
-        logger.warning("Connecting to database ...")
+        logger.info("Connecting to PostgreSQL database to initialize ...")
 
         # Seed permissions
         for perm in ("chat", "manage_users", "manage_roles", "moderate_content"):
@@ -278,6 +278,7 @@ async def ensure_qdrant_collection():
                 collection_name=QDRANT_COLLECTION,
                 vectors_config=VectorParams(size=EMBED_DIM, distance=Distance.COSINE),
             )
+        logger.info(f"Qdrant init completed, collection '{QDRANT_COLLECTION}' is ready")
     except Exception as e:
         logger.warning(f"Qdrant init skipped (will retry on first use): {e}")
 
@@ -439,15 +440,17 @@ async def chat_endpoint(
                 model=EMBED_MODEL, input=[condensed]
             )
             query_vec  = embed_resp.data[0].embedding
-            hits       = await qdrant.search(
+            _rag_resp  = await qdrant.query_points(
                 collection_name=QDRANT_COLLECTION,
-                query_vector=query_vec,
+                query=query_vec,
                 query_filter=Filter(must=[
                     FieldCondition(key="user_id", match=MatchValue(value=uid))
                 ]),
                 limit=3,
-                score_threshold=0.5,
+                score_threshold=0.3,
             )
+            hits = _rag_resp.points
+            logger.info(f"RAG: query='{condensed[:80]}' hits={len(hits)} scores={[round(h.score,3) for h in hits]}")
             if hits:
                 context  = "\n\n---\n".join(h.payload["text"] for h in hits)
                 messages = [{
@@ -463,8 +466,8 @@ async def chat_endpoint(
                      "excerpt":  h.payload["text"][:200]}
                     for h in hits
                 ]
-    except Exception:
-        pass   # RAG failure must never break chat
+    except Exception as rag_err:
+        logger.warning(f"RAG retrieval failed: {rag_err}")  # RAG failure must never break chat
 
     return StreamingResponse(
         stream_with_sources(messages, body.model, sources),
@@ -841,10 +844,13 @@ async def image_describe(
                 ],
             }],
         )
-        result_text = response.choices[0].message.content
+        raw = response.choices[0].message.content
+        logger.info(f"Vision ({VISION_MODEL}): content={repr(raw[:120] if raw else raw)}")
+        result_text = raw or "[Vision model returned no description — check VISION_MODEL and VISION_BASE_URL]"
         img_status = "completed"
         error_message = None
     except Exception as e:
+        logger.warning(f"Vision ({VISION_MODEL}) failed: {e}")
         result_text = f"[Image analysis failed: {e}]"
         img_status = "failed"
         error_message = str(e)
@@ -955,7 +961,10 @@ async def image_generate(
         )
 
     if img_status == "failed":
-        raise HTTPException(status_code=502, detail=f"Image generation failed: {error_message}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Image generation service unavailable ({IMAGE_SERVICE_URL}): {error_message}",
+        )
 
     return {
         "generation_id": generation_id,

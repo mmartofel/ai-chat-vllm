@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="style.css" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify/dist/purify.min.js"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.7.0/highlight.min.js"></script>
@@ -155,19 +156,19 @@
                         </span>
                         <span class="text-xs text-indigo-200">Welcome, {{ currentUser }}!</span>
                         <button @click="newChat"
-                                :disabled="isImageLoading || isStreaming"
+                                :disabled="isImageLoading || isStreaming || isIndexing"
                                 class="text-xs bg-indigo-500 hover:bg-indigo-400 px-3 py-1.5 rounded transition-colors flex items-center gap-1 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                                 title="Start new conversation">
                             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
                             New Chat
                         </button>
                         <a v-if="currentRole === 'admin'" href="/admin.html"
-                           :class="(isImageLoading || isStreaming) ? 'pointer-events-none opacity-50' : 'hover:bg-yellow-400'"
+                           :class="(isImageLoading || isStreaming || isIndexing) ? 'pointer-events-none opacity-50' : 'hover:bg-yellow-400'"
                            class="text-xs bg-yellow-500 px-3 py-1.5 rounded transition-colors font-medium text-white">
                           Admin
                         </a>
                         <button @click="logout"
-                                :disabled="isImageLoading || isStreaming"
+                                :disabled="isImageLoading || isStreaming || isIndexing"
                                 class="text-xs bg-red-500 hover:bg-red-400 px-3 py-1.5 rounded transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed">
                           Sign Out
                         </button>
@@ -192,7 +193,7 @@
                                 <img :src="msg.url" :alt="msg.content" class="rounded-lg max-w-full" />
                                 <div class="text-xs mt-1 opacity-60">{{ msg.content }}</div>
                             </template>
-                            <div v-else-if="msg.role === 'assistant'" class="prose prose-sm max-w-none" v-html="renderMarkdown(msg.content)"></div>
+                            <div v-else-if="msg.role === 'assistant'" class="prose prose-sm max-w-none" v-html="renderMarkdown(msg.content, isStreaming && index === messages.length - 1)"></div>
                             <div v-else class="whitespace-pre-wrap text-sm leading-relaxed">{{ msg.content }}</div>
                             <div v-if="msg.role === 'assistant' && msg.durationMs" class="msg-timing">
                                 ⏱ {{ (msg.durationMs / 1000).toFixed(1) }}s
@@ -243,7 +244,7 @@
                         <button
                             type="button"
                             class="flex-shrink-0 p-2 text-gray-400 hover:text-indigo-600 disabled:opacity-40 transition-colors"
-                            :disabled="isStreaming || isImageLoading"
+                            :disabled="isStreaming || isImageLoading || isIndexing"
                             @click="imageUploadRef.click()"
                             title="Upload image for analysis">
                             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -259,14 +260,14 @@
                             placeholder="Type a message, or /image &lt;prompt&gt; to generate an image…"
                             rows="1"
                             class="w-full p-3 pr-12 rounded-2xl border border-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm transition-all resize-none overflow-hidden min-h-[52px] max-h-[200px] text-sm"
-                            :disabled="isStreaming"
+                            :disabled="isStreaming || isIndexing"
                             @input="autoResize"
                             @keydown.enter.exact.prevent="sendMessage"
                             autofocus
                         ></textarea>
                         <button type="submit"
                             class="absolute right-2 bottom-2.5 p-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 disabled:opacity-40 transition-colors"
-                            :disabled="!userInput.trim() || isStreaming">
+                            :disabled="!userInput.trim() || isStreaming || isIndexing">
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
                         </button>
                     </form>

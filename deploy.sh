@@ -9,6 +9,9 @@ cd deployment/chat-vllm
 cd ../image-vllm
 ./deploy.sh
 
+cd ../embed-vllm
+./deploy.sh
+
 cd ../..
 oc apply -k ./deployment
 

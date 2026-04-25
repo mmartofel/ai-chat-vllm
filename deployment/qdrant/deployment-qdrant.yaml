@@ -2,7 +2,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: qdrant
-  namespace: ${NAMESPACE}
   labels:
     app: qdrant
     app.kubernetes.io/component: vector-db
