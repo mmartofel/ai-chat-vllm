@@ -1,18 +1,18 @@
 # OpenShift Route with TLS edge termination.
 # Leave spec.host empty — OpenShift auto-assigns a hostname based on the
-# cluster's wildcard domain (e.g. vllm-vllm-inference.apps.<cluster-domain>).
+# cluster's wildcard domain (e.g. model-vllm-vllm-inference.apps.<cluster-domain>).
 # Set spec.host explicitly if you need a custom hostname.
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: vllm
+  name: model-vllm
   namespace: ${NAMESPACE}
   labels:
-    app: vllm
+    app: model-vllm
 spec:
   to:
     kind: Service
-    name: vllm
+    name: model-vllm
   port:
     targetPort: http
   tls:

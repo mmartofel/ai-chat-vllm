@@ -1,12 +1,12 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: vllm
+  name: model-vllm
   namespace: ${NAMESPACE}
   labels:
-    app: vllm
-    app.kubernetes.io/component: vllm
-    app.kubernetes.io/name: vllm
+    app: model-vllm
+    app.kubernetes.io/component: model-vllm
+    app.kubernetes.io/name: model-vllm
     app.kubernetes.io/part-of: VLLM_SUBSYSTEM
     app.openshift.io/runtime: golang
 spec:
@@ -18,13 +18,13 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      app: vllm
+      app: model-vllm
   template:
     metadata:
       labels:
-        app: vllm
+        app: model-vllm
     spec:
-      serviceAccountName: vllm-sa
+      serviceAccountName: model-vllm-sa
       securityContext:
         runAsUser: 0
       # Using the RHAIIS image which does not carry the restrictive
@@ -41,8 +41,8 @@ spec:
       runtimeClassName: nvidia
       #
       # Kubernetes injects <SERVICE_NAME>_PORT=tcp://... env vars for every
-      # Service in the namespace. Because the Service is named "vllm", this
-      # produces VLLM_PORT=tcp://..., which collides with vLLM's own VLLM_PORT
+      # Service in the namespace. Because the Service is named "model-vllm", this
+      # produces MODEL_VLLM_PORT=tcp://..., which collides with vLLM's own VLLM_PORT
       # variable (expects a plain integer port). Disabling service links
       # prevents all such injections.
       enableServiceLinks: false
@@ -182,7 +182,7 @@ spec:
       volumes:
         - name: models-cache
           persistentVolumeClaim:
-            claimName: vllm-models-cache
+            claimName: model-vllm-models-cache
         - name: shm
           emptyDir:
             medium: Memory
