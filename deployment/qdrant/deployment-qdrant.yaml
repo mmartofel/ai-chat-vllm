@@ -19,6 +19,7 @@ spec:
       labels:
         app: qdrant
     spec:
+      serviceAccountName: qdrant
       securityContext:
         runAsUser: 1000
         fsGroup: 1000
