@@ -17,6 +17,7 @@ from jose import JWTError, jwt
 from miniopy_async import Minio
 from openai import AsyncOpenAI
 from pydantic import BaseModel
+from typing import Optional
 from dotenv import load_dotenv
 
 # Load env vars if present
@@ -291,6 +292,7 @@ class ImageGenerateRequest(BaseModel):
     prompt: str
     width: int = 512
     height: int = 512
+    previous_image_url: Optional[str] = None
 
 
 # --- Streaming ---
@@ -660,6 +662,12 @@ async def image_describe(
         )
 
         await conn.execute(
+            """INSERT INTO conversations (id, user_id, title, messages, created_at, updated_at)
+               VALUES ($1, $2, 'New Conversation', '[]'::jsonb, NOW(), NOW())
+               ON CONFLICT (id) DO NOTHING""",
+            conversation_id, uid,
+        )
+        await conn.execute(
             """INSERT INTO image_generations
                (id, conversation_id, user_id, mode, source_image_key, status)
                VALUES ($1, $2, $3, 'image_to_text', $4, 'processing')""",
@@ -717,17 +725,52 @@ async def image_generate(
     async with pool.acquire() as conn:
         uid = await get_user_id(conn, user["username"])
         await conn.execute(
+            """INSERT INTO conversations (id, user_id, title, messages, created_at, updated_at)
+               VALUES ($1, $2, 'New Conversation', '[]'::jsonb, NOW(), NOW())
+               ON CONFLICT (id) DO NOTHING""",
+            body.conversation_id, uid,
+        )
+        await conn.execute(
             """INSERT INTO image_generations
                (id, conversation_id, user_id, mode, prompt, status)
                VALUES ($1, $2, $3, 'text_to_image', $4, 'processing')""",
             uuid.UUID(generation_id), body.conversation_id, uid, body.prompt,
         )
 
+    effective_prompt = body.prompt
+    if body.previous_image_url:
+        try:
+            async with httpx.AsyncClient(timeout=30) as http:
+                img_resp = await http.get(body.previous_image_url)
+                img_resp.raise_for_status()
+            prev_b64 = base64.b64encode(img_resp.content).decode()
+            vision_client = AsyncOpenAI(base_url=VISION_BASE_URL, api_key=VISION_API_KEY)
+            vision_resp = await vision_client.chat.completions.create(
+                model=VISION_MODEL,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "image_url",
+                         "image_url": {"url": f"data:image/png;base64,{prev_b64}"}},
+                        {"type": "text",
+                         "text": (
+                             f"Describe this image in detail. The user wants to refine it with: "
+                             f"'{body.prompt}'. Write a comprehensive text-to-image generation prompt "
+                             f"that preserves the key visual elements of the original image and "
+                             f"incorporates the requested changes."
+                         )},
+                    ],
+                }],
+            )
+            effective_prompt = vision_resp.choices[0].message.content
+        except Exception:
+            effective_prompt = body.prompt
+
     try:
         async with httpx.AsyncClient(timeout=3600) as http:   # CPU can be slow
             resp = await http.post(
                 f"{IMAGE_SERVICE_URL}/generate",
-                json={"prompt": body.prompt, "width": body.width, "height": body.height},
+                json={"prompt": effective_prompt, "width": body.width, "height": body.height},
             )
             resp.raise_for_status()
         image_bytes = resp.content
