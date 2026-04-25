@@ -78,8 +78,10 @@ spec:
             - ${MODEL_ID}
             - --task
             - embed
+            - --device
+            - cpu
             - --dtype
-            - auto
+            - float32
             - --max-num-seqs
             - "64"
             - --max-model-len
