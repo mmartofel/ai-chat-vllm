@@ -320,6 +320,10 @@ createApp({
             await nextTick();
             scrollToBottom();
 
+            const prevGenMsg = [...messages.value].reverse()
+                .find(m => m.role === 'assistant' && m.type === 'image' && m.url);
+            const previousImageUrl = prevGenMsg?.url ?? null;
+
             try {
                 const res = await fetch('/images/generate', {
                     method: 'POST',
@@ -329,6 +333,7 @@ createApp({
                         prompt,
                         width: 1024,
                         height: 576,
+                        previous_image_url: previousImageUrl,
                     }),
                 });
                 if (res.status === 401) { isAuthenticated.value = false; return; }
