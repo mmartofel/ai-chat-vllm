@@ -21,8 +21,7 @@ spec:
     spec:
       serviceAccountName: qdrant
       securityContext:
-        runAsUser: 1000
-        fsGroup: 1000
+        runAsUser: 0
       containers:
         - name: qdrant
           image: docker.io/qdrant/qdrant:latest
