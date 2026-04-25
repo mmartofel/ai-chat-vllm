@@ -35,17 +35,23 @@ spec:
             - |
               set -e
               MODEL_DIR=${MODEL_PATH}
-              if [ -f "${MODEL_DIR}/config.json" ]; then
-                echo "Model already present at ${MODEL_DIR}, skipping download."
+              if [ ! -f "${MODEL_DIR}/config.json" ]; then
+                echo "Downloading ${MODEL_ID} from Hugging Face Hub..."
+                huggingface-cli download ${MODEL_ID} \
+                  --local-dir "${MODEL_DIR}" \
+                  --local-dir-use-symlinks False
+                echo "Download complete."
                 ls -alh ${MODEL_DIR}
-                exit 0
+              else
+                echo "Model already present at ${MODEL_DIR}, skipping download."
               fi
-              echo "Downloading ${MODEL_ID} from Hugging Face Hub..."
-              huggingface-cli download ${MODEL_ID} \
-                --local-dir "${MODEL_DIR}" \
-                --local-dir-use-symlinks False
-              echo "Download complete."
-              ls -alh ${MODEL_DIR}
+              echo "Warming HF modules cache for custom model code..."
+              python3 -c "
+              from transformers import AutoConfig
+              AutoConfig.from_pretrained('${MODEL_DIR}', trust_remote_code=True)
+              print('Modules cache warm.')
+              "
+              echo "Init complete."
           env:
             - name: HUGGING_FACE_HUB_TOKEN
               valueFrom:
@@ -76,23 +82,26 @@ spec:
             - ${MODEL_PATH}
             - --served-model-name
             - ${MODEL_ID}
-            - --task
-            - embed
-            - --device
-            - cpu
+            - --runner
+            - pooling
             - --dtype
             - float32
             - --max-num-seqs
             - "64"
             - --max-model-len
-            - "8192"
+            - "2048"
             - --enforce-eager
+            - --trust-remote-code
           env:
             - name: HUGGING_FACE_HUB_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: hf-token-secret
                   key: token
+            - name: HF_HOME
+              value: ${HF_DIR}/.hf-cache
+            - name: HF_HUB_OFFLINE
+              value: "1"
           ports:
             - name: http
               containerPort: 8000
