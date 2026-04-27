@@ -37,6 +37,7 @@ createApp({
         const currentConvId = ref(null);
         const serverInfo = ref({ model: '', url: '' });
         const lastResponseMs = ref(null);
+        const MAX_CTX_MESSAGES = 20;
 
         // Auth state
         const isImageLoading = ref(false);
@@ -427,7 +428,7 @@ createApp({
                 const response = await fetch('/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ messages: messages.value.slice(0, -1) })
+                    body: JSON.stringify({ messages: messages.value.slice(0, -1).slice(-MAX_CTX_MESSAGES) })
                 });
 
                 if (response.status === 401) {
