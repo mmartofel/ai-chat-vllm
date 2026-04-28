@@ -299,6 +299,7 @@ app = FastAPI(lifespan=lifespan)
 class ChatRequest(BaseModel):
     messages: list
     model: str = MODEL_NAME
+    use_rag: bool = True
 
 
 class LoginRequest(BaseModel):
@@ -373,6 +374,18 @@ def chunk_text(text: str, size: int = 400, overlap: int = 50) -> list[str]:
     return [c for c in chunks if c.strip()]
 
 
+CHAR_BUDGET = 12_000  # ~3000 tokens at 4 chars/token, leaving ~1000 tokens for response
+
+
+def truncate_to_budget(msgs: list, budget: int = CHAR_BUDGET) -> list:
+    total = sum(len(str(m.get("content", ""))) for m in msgs)
+    start = 1 if msgs and msgs[0].get("role") == "system" else 0
+    while total > budget and len(msgs) > start + 1:
+        removed = msgs.pop(start)
+        total -= len(str(removed.get("content", "")))
+    return msgs
+
+
 async def condense_query(messages: list) -> str:
     if len(messages) <= 1:
         last = messages[-1] if messages else {}
@@ -428,46 +441,49 @@ async def chat_endpoint(
     sources  = []
 
     try:
-        doc_count = await qdrant.count(
-            collection_name=QDRANT_COLLECTION,
-            count_filter=Filter(must=[
-                FieldCondition(key="user_id", match=MatchValue(value=uid))
-            ]),
-        )
-        if doc_count.count > 0 and messages:
-            condensed  = await condense_query(messages)
-            embed_resp = await embed_client.embeddings.create(
-                model=EMBED_MODEL, input=[condensed]
-            )
-            query_vec  = embed_resp.data[0].embedding
-            _rag_resp  = await qdrant.query_points(
+        if body.use_rag:
+            doc_count = await qdrant.count(
                 collection_name=QDRANT_COLLECTION,
-                query=query_vec,
-                query_filter=Filter(must=[
+                count_filter=Filter(must=[
                     FieldCondition(key="user_id", match=MatchValue(value=uid))
                 ]),
-                limit=3,
-                score_threshold=0.3,
             )
-            hits = _rag_resp.points
-            logger.info(f"RAG: query='{condensed[:80]}' hits={len(hits)} scores={[round(h.score,3) for h in hits]}")
-            if hits:
-                context  = "\n\n---\n".join(h.payload["text"] for h in hits)
-                messages = [{
-                    "role": "system",
-                    "content": (
-                        "Answer using the document context below. "
-                        "If it is not relevant, use your general knowledge.\n\n"
-                        + context
-                    ),
-                }] + messages
-                sources = [
-                    {"filename": h.payload["filename"],
-                     "excerpt":  h.payload["text"][:200]}
-                    for h in hits
-                ]
+            if doc_count.count > 0 and messages:
+                condensed  = await condense_query(messages)
+                embed_resp = await embed_client.embeddings.create(
+                    model=EMBED_MODEL, input=[condensed]
+                )
+                query_vec  = embed_resp.data[0].embedding
+                _rag_resp  = await qdrant.query_points(
+                    collection_name=QDRANT_COLLECTION,
+                    query=query_vec,
+                    query_filter=Filter(must=[
+                        FieldCondition(key="user_id", match=MatchValue(value=uid))
+                    ]),
+                    limit=3,
+                    score_threshold=0.3,
+                )
+                hits = _rag_resp.points
+                logger.info(f"RAG: query='{condensed[:80]}' hits={len(hits)} scores={[round(h.score,3) for h in hits]}")
+                if hits:
+                    context  = "\n\n---\n".join(h.payload["text"][:500] for h in hits)
+                    messages = [{
+                        "role": "system",
+                        "content": (
+                            "Answer using the document context below. "
+                            "If it is not relevant, use your general knowledge.\n\n"
+                            + context
+                        ),
+                    }] + messages
+                    sources = [
+                        {"filename": h.payload["filename"],
+                         "excerpt":  h.payload["text"][:200]}
+                        for h in hits
+                    ]
     except Exception as rag_err:
         logger.warning(f"RAG retrieval failed: {rag_err}")  # RAG failure must never break chat
+
+    messages = truncate_to_budget(messages)
 
     return StreamingResponse(
         stream_with_sources(messages, body.model, sources),
@@ -1077,11 +1093,12 @@ async def delete_document(
     async with pool.acquire() as conn:
         uid = await get_user_id(conn, user["username"])
         row = await conn.fetchrow(
-            "SELECT id FROM documents WHERE id=$1 AND user_id=$2",
+            "SELECT id, file_key FROM documents WHERE id=$1 AND user_id=$2",
             uuid.UUID(doc_id), uid,
         )
         if not row:
             raise HTTPException(404, "Document not found")
+        file_key = row["file_key"]
         await conn.execute("DELETE FROM documents WHERE id=$1", uuid.UUID(doc_id))
 
     await qdrant.delete(
@@ -1092,6 +1109,12 @@ async def delete_document(
             ])
         ),
     )
+
+    if file_key:
+        try:
+            await minio_client.remove_object(MINIO_BUCKET, file_key)
+        except Exception as e:
+            logger.warning(f"MinIO delete failed for {file_key}: {e}")
 
 
 # --- Frontend Serving ---
