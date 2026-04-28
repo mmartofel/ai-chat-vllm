@@ -1,4 +1,4 @@
-const { createApp, ref, nextTick, onMounted } = Vue;
+const { createApp, ref, computed, nextTick, onMounted } = Vue;
 
 // Configure marked: GFM, soft line-breaks, and inline hljs highlighting
 marked.use({
@@ -38,6 +38,11 @@ createApp({
         const serverInfo = ref({ model: '', url: '' });
         const lastResponseMs = ref(null);
         const MAX_CTX_MESSAGES = 20;
+        const useRag = ref(true);
+
+        const estimatedTokens = computed(() =>
+            Math.round(messages.value.reduce((sum, m) => sum + (m.content?.length || 0), 0) / 4)
+        );
 
         // Auth state
         const isImageLoading = ref(false);
@@ -163,6 +168,12 @@ createApp({
             currentConvId.value = generateId();
             lastResponseMs.value = null;
             if (window.innerWidth < 768) sidebarOpen.value = false;
+            nextTick(() => textareaRef.value?.focus());
+        };
+
+        const clearContext = () => {
+            messages.value = [];
+            status.value = 'Context cleared';
             nextTick(() => textareaRef.value?.focus());
         };
 
@@ -428,7 +439,7 @@ createApp({
                 const response = await fetch('/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ messages: messages.value.slice(0, -1).slice(-MAX_CTX_MESSAGES) })
+                    body: JSON.stringify({ messages: messages.value.slice(0, -1).slice(-MAX_CTX_MESSAGES), use_rag: useRag.value })
                 });
 
                 if (response.status === 401) {
@@ -493,13 +504,17 @@ createApp({
                 fd.append('file', file);
                 const res = await fetch('/documents/upload', { method: 'POST', body: fd });
                 if (res.status === 401) { isAuthenticated.value = false; return; }
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                if (!res.ok) {
+                    const body = await res.json().catch(() => ({}));
+                    status.value = `Index failed: ${body.detail || `HTTP ${res.status}`}`;
+                } else {
+                    status.value = 'Ready';
+                }
                 await loadDocuments();
             } catch (e) {
                 status.value = `Index failed: ${e.message}`;
             } finally {
                 isIndexing.value = false;
-                status.value = 'Ready';
             }
         };
 
@@ -540,7 +555,8 @@ createApp({
             isImageLoading, imageUploadRef, sendImage, generateImage,
             documents, isIndexing, docUploadRef, loadDocuments, uploadDocument, deleteDocument,
             sendMessage, renderMarkdown, autoResize,
-            newChat, loadConversation, deleteConversation, formatDate,
+            newChat, clearContext, loadConversation, deleteConversation, formatDate,
+            useRag, estimatedTokens,
             login, logout
         };
     }
