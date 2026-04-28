@@ -504,13 +504,17 @@ createApp({
                 fd.append('file', file);
                 const res = await fetch('/documents/upload', { method: 'POST', body: fd });
                 if (res.status === 401) { isAuthenticated.value = false; return; }
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                if (!res.ok) {
+                    const body = await res.json().catch(() => ({}));
+                    status.value = `Index failed: ${body.detail || `HTTP ${res.status}`}`;
+                } else {
+                    status.value = 'Ready';
+                }
                 await loadDocuments();
             } catch (e) {
                 status.value = `Index failed: ${e.message}`;
             } finally {
                 isIndexing.value = false;
-                status.value = 'Ready';
             }
         };
 

@@ -51,7 +51,7 @@ MINIO_PUBLIC_BASE = os.getenv("MINIO_PUBLIC_BASE_URL", "http://localhost:9000/im
 QDRANT_URL        = os.getenv("QDRANT_URL",       "http://localhost:6333")
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "documents")
 EMBED_MODEL       = os.getenv("EMBED_MODEL",       "nomic-ai/nomic-embed-text-v1.5")
-EMBED_BASE_URL    = os.getenv("EMBED_BASE_URL",    "http://localhost:8001/v1")
+EMBED_BASE_URL    = os.getenv("EMBED_BASE_URL",    LLM_API_URL)
 EMBED_API_KEY     = os.getenv("EMBED_API_KEY",     "dummy-key")
 EMBED_DIM         = int(os.getenv("EMBED_DIM",     "768"))
 
