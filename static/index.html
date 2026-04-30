@@ -108,13 +108,13 @@
                     <button @click="docUploadRef.click()"
                             :disabled="isIndexing"
                             class="p-1 text-gray-400 hover:text-indigo-400 disabled:opacity-40 transition-colors"
-                            title="Upload document (PDF, DOCX, TXT, MD)">
+                            title="Upload document (PDF, DOCX, TXT, MD, PNG, JPG)">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
                         </svg>
                     </button>
                 </div>
-                <input ref="docUploadRef" type="file" accept=".pdf,.docx,.txt,.md" class="hidden"
+                <input ref="docUploadRef" type="file" accept=".pdf,.docx,.txt,.md,.png,.jpg,.jpeg" class="hidden"
                        @change="e => { if (e.target.files[0]) uploadDocument(e.target.files[0]); e.target.value=''; }" />
                 <div class="px-2 pb-3 space-y-1">
                     <div v-if="isIndexing" class="text-xs text-indigo-400 px-2 py-1 animate-pulse">Indexing…</div>

@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: embed-model-config
+  namespace: ${NAMESPACE}
+data:
+  EMBED_MODEL: "${MODEL_ID}"
+  EMBED_DIM: "${EMBED_DIM}"

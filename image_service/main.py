@@ -35,6 +35,8 @@ dtype = torch.float16 if device == "cuda" else torch.float32
 logging.info(f"Using device: {device.upper()} with dtype: {dtype}")
 
 logging.info(f"Loading {MODEL_ID} on {device.upper()} with {dtype}...")
+logging.info(f"Downloading model image ...........")
+
 _devnull = os.open(os.devnull, os.O_WRONLY)
 _saved_stderr = os.dup(2)
 os.dup2(_devnull, 2)
@@ -46,7 +48,7 @@ finally:
     os.dup2(_saved_stderr, 2)
     os.close(_saved_stderr)
     os.close(_devnull)
-logging.info("Model loaded.")
+logging.info("Model has been loaded.")
 
 pipe.set_progress_bar_config(disable=True)
 
