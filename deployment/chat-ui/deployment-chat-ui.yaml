@@ -28,6 +28,8 @@ spec:
         envFrom:
         - configMapRef:
             name: chat-ui
+        - configMapRef:
+            name: embed-model-config
         # livenessProbe:
         #   httpGet:
         #     path: /healthz

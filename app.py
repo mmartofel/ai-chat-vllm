@@ -1,3 +1,4 @@
+import asyncio
 import io
 import os
 import uuid
@@ -53,7 +54,9 @@ QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION",     "documents")
 EMBED_MODEL       = os.getenv("EMBED_MODEL",           "nomic-ai/nomic-embed-text-v1.5")
 EMBED_BASE_URL    = os.getenv("EMBED_BASE_URL",        "http://localhost:11434/v1")
 EMBED_API_KEY     = os.getenv("EMBED_API_KEY",         "dummy-key")
-EMBED_DIM         = int(os.getenv("EMBED_DIM",         "768"))
+EMBED_DIM              = int(os.getenv("EMBED_DIM",              "768"))
+VISION_EMBED_ENABLED   = os.getenv("VISION_EMBED_ENABLED",   "true").lower() == "true"
+VISION_EMBED_MAX_IMAGES = int(os.getenv("VISION_EMBED_MAX_IMAGES", "5"))
 
 logger = logging.getLogger("uvicorn.app")
 logger.warning(f"LLM_NAME = {MODEL_NAME}")
@@ -270,17 +273,24 @@ def require_permission(perm: str):
 # --- Lifespan ---
 
 async def ensure_qdrant_collection():
-    try:
-        existing = await qdrant.get_collections()
-        names = [c.name for c in existing.collections]
-        if QDRANT_COLLECTION not in names:
-            await qdrant.create_collection(
-                collection_name=QDRANT_COLLECTION,
-                vectors_config=VectorParams(size=EMBED_DIM, distance=Distance.COSINE),
-            )
-        logger.info(f"Qdrant init completed, collection '{QDRANT_COLLECTION}' is ready")
-    except Exception as e:
-        logger.warning(f"Qdrant init skipped (will retry on first use): {e}")
+    for attempt in range(12):
+        try:
+            existing = await qdrant.get_collections()
+            names = [c.name for c in existing.collections]
+            if QDRANT_COLLECTION not in names:
+                await qdrant.create_collection(
+                    collection_name=QDRANT_COLLECTION,
+                    vectors_config=VectorParams(size=EMBED_DIM, distance=Distance.COSINE),
+                )
+            logger.info(f"Qdrant collection '{QDRANT_COLLECTION}' is ready")
+            return
+        except Exception as e:
+            wait = min(2 ** attempt, 30)
+            if attempt < 11:
+                logger.warning(f"Qdrant not ready (attempt {attempt + 1}/12): {e} — retrying in {wait}s")
+                await asyncio.sleep(wait)
+            else:
+                logger.error(f"Qdrant collection init failed after 12 attempts: {e}")
 
 
 @asynccontextmanager
@@ -341,6 +351,7 @@ class ImageGenerateRequest(BaseModel):
     width: int = 512
     height: int = 512
     previous_image_url: Optional[str] = None
+    use_rag: bool = False
 
 
 class DocumentUploadResponse(BaseModel):
@@ -360,6 +371,62 @@ def extract_text(file_bytes: bytes, file_type: str) -> str:
         doc = _docx.Document(io.BytesIO(file_bytes))
         return "\n".join(p.text for p in doc.paragraphs)
     return file_bytes.decode("utf-8", errors="replace")
+
+
+def extract_images_from_pdf(file_bytes: bytes) -> list[tuple[bytes, str, str]]:
+    """Return (image_bytes, mime_type, context_text) for every embedded image in the PDF.
+
+    context_text is built from text spans whose y-position is within 80 points of the
+    image, which maps each flag image to its own country section rather than the full page.
+    """
+    import fitz  # PyMuPDF — lazy import so startup is unaffected if not installed
+    images: list[tuple[bytes, str, str]] = []
+    doc = fitz.open(stream=file_bytes, filetype="pdf")
+    for page in doc:
+        full_page_text = page.get_text().strip()
+        # Collect (y_pos, text) for every span on this page
+        spans: list[tuple[float, str]] = []
+        for block in page.get_text("dict").get("blocks", []):
+            if block.get("type") == 0:
+                for line in block.get("lines", []):
+                    for span in line.get("spans", []):
+                        t = span["text"].strip()
+                        if t:
+                            spans.append((span["origin"][1], t))
+        for img_info in page.get_images(full=True):
+            xref = img_info[0]
+            base_image = doc.extract_image(xref)
+            fmt = base_image.get("ext", "png")
+            rects = page.get_image_rects(xref)
+            if rects:
+                img_y = rects[0].y0
+                context = " ".join(t for y, t in spans if abs(y - img_y) <= 80)
+            else:
+                context = ""
+            images.append((base_image["image"], f"image/{fmt}", context or full_page_text))
+    return images
+
+
+async def describe_image_for_rag(image_bytes: bytes, content_type: str = "image/png") -> str:
+    vision_client = AsyncOpenAI(base_url=VISION_BASE_URL, api_key=VISION_API_KEY)
+    b64 = base64.b64encode(image_bytes).decode()
+    resp = await vision_client.chat.completions.create(
+        model=VISION_MODEL,
+        messages=[{
+            "role": "user",
+            "content": [
+                {"type": "image_url",
+                 "image_url": {"url": f"data:{content_type};base64,{b64}"}},
+                {"type": "text",
+                 "text": (
+                     "Describe this image in detail for document retrieval. "
+                     "Include all visible text, data, labels, and visual content."
+                 )},
+            ],
+        }],
+        max_tokens=300,
+    )
+    return resp.choices[0].message.content.strip()
 
 
 def chunk_text(text: str, size: int = 400, overlap: int = 50) -> list[str]:
@@ -476,8 +543,9 @@ async def chat_endpoint(
                         ),
                     }] + messages
                     sources = [
-                        {"filename": h.payload["filename"],
-                         "excerpt":  h.payload["text"][:200]}
+                        {"filename":     h.payload["filename"],
+                         "excerpt":      h.payload["text"][:200],
+                         "content_type": h.payload.get("content_type", "text")}
                         for h in hits
                     ]
     except Exception as rag_err:
@@ -941,6 +1009,64 @@ async def image_generate(
         except Exception:
             effective_prompt = body.prompt
 
+    # RAG: return a stored matching image directly, bypassing the generation service
+    if body.use_rag:
+        try:
+            doc_count = await qdrant.count(
+                collection_name=QDRANT_COLLECTION,
+                count_filter=Filter(must=[
+                    FieldCondition(key="user_id", match=MatchValue(value=uid))
+                ]),
+            )
+            if doc_count.count > 0:
+                embed_resp = await embed_client.embeddings.create(
+                    model=EMBED_MODEL, input=[body.prompt]
+                )
+                query_vec = embed_resp.data[0].embedding
+                rag_resp = await qdrant.query_points(
+                    collection_name=QDRANT_COLLECTION,
+                    query=query_vec,
+                    query_filter=Filter(must=[
+                        FieldCondition(key="user_id", match=MatchValue(value=uid)),
+                    ]),
+                    limit=1,
+                    score_threshold=0.35,
+                )
+                if rag_resp.points:
+                    logger.info(
+                        f"RAG image top candidate: score={rag_resp.points[0].score:.3f} "
+                        f"text={rag_resp.points[0].payload.get('text', '')[:60]!r}"
+                    )
+                hits = rag_resp.points
+                if hits:
+                    img_key = hits[0].payload.get("source_image_key")
+                    if img_key:
+                        rag_url = f"{MINIO_PUBLIC_BASE}/{img_key}"
+                        logger.info(
+                            f"RAG image: prompt='{body.prompt[:60]}' "
+                            f"key={img_key} score={hits[0].score:.3f}"
+                        )
+                        async with pool.acquire() as conn:
+                            await conn.execute(
+                                """UPDATE image_generations
+                                   SET status='completed', completed_at=NOW()
+                                   WHERE id=$1""",
+                                uuid.UUID(generation_id),
+                            )
+                        return {
+                            "generation_id": generation_id,
+                            "conversation_id": body.conversation_id,
+                            "image_url": rag_url,
+                            "status": "completed",
+                        }
+                    else:
+                        # Text context only: enrich the generation prompt
+                        ctx = hits[0].payload.get("text", "")[:200]
+                        if ctx:
+                            effective_prompt = f"{effective_prompt}, {ctx}"
+        except Exception as rag_err:
+            logger.warning(f"RAG lookup for image generation failed: {rag_err}")
+
     try:
         async with httpx.AsyncClient(timeout=3600) as http:   # CPU can be slow
             resp = await http.post(
@@ -998,10 +1124,12 @@ async def document_upload(
     file: UploadFile = File(...),
     user: dict = Depends(require_permission("chat")),
 ):
-    allowed = {"pdf", "docx", "txt", "md"}
+    allowed = {"pdf", "docx", "txt", "md", "png", "jpg", "jpeg"}
     ext = (file.filename or "").rsplit(".", 1)[-1].lower()
     if ext not in allowed:
         raise HTTPException(400, f"Unsupported file type: .{ext}")
+    if ext in {"png", "jpg", "jpeg"} and not VISION_EMBED_ENABLED:
+        raise HTTPException(400, "Image embedding is disabled on this server")
 
     pool: asyncpg.Pool = request.app.state.db
     file_bytes = await file.read()
@@ -1023,13 +1151,45 @@ async def document_upload(
         )
 
     try:
-        text   = extract_text(file_bytes, ext)
-        chunks = chunk_text(text)
-        if not chunks:
-            raise ValueError("No text extracted from document")
+        if ext in {"png", "jpg", "jpeg"}:
+            description = await describe_image_for_rag(
+                file_bytes, file.content_type or f"image/{ext}"
+            )
+            if not description:
+                raise ValueError("Vision model returned no description")
+            all_chunks  = [description]
+            chunk_types = ["image"]
+            source_keys = [file_key]   # point back to the already-stored file
+        else:
+            text   = extract_text(file_bytes, ext)
+            chunks = chunk_text(text)
+            if not chunks:
+                raise ValueError("No text extracted from document")
+            all_chunks  = list(chunks)
+            chunk_types = ["text"] * len(chunks)
+            source_keys = [None] * len(chunks)
+            if ext == "pdf" and VISION_EMBED_ENABLED:
+                img_counter = 0
+                try:
+                    for img_bytes, img_ctype, page_text in extract_images_from_pdf(file_bytes):
+                        if not page_text.strip():
+                            continue
+                        img_fmt = img_ctype.split("/")[-1]
+                        img_key = f"rag-images/{uid}/{doc_id}/{img_counter}.{img_fmt}"
+                        await minio_client.put_object(
+                            MINIO_BUCKET, img_key,
+                            io.BytesIO(img_bytes), length=len(img_bytes),
+                            content_type=img_ctype,
+                        )
+                        all_chunks.append(page_text)
+                        chunk_types.append("image")
+                        source_keys.append(img_key)
+                        img_counter += 1
+                except Exception as img_err:
+                    logger.warning(f"PDF image extraction skipped: {img_err}")
 
         embed_resp = await embed_client.embeddings.create(
-            model=EMBED_MODEL, input=chunks
+            model=EMBED_MODEL, input=all_chunks
         )
         vectors = [e.embedding for e in embed_resp.data]
 
@@ -1038,21 +1198,24 @@ async def document_upload(
                 id=str(uuid.uuid4()),
                 vector=vec,
                 payload={
-                    "document_id": doc_id,
-                    "user_id":     uid,
-                    "chunk_index": i,
-                    "text":        chunk,
-                    "filename":    file.filename,
+                    "document_id":      doc_id,
+                    "user_id":          uid,
+                    "chunk_index":      i,
+                    "text":             chunk,
+                    "filename":         file.filename,
+                    "content_type":     ctype,
+                    "source_image_key": skey,
                 },
             )
-            for i, (vec, chunk) in enumerate(zip(vectors, chunks))
+            for i, (vec, chunk, ctype, skey) in enumerate(zip(vectors, all_chunks, chunk_types, source_keys))
         ]
+        await ensure_qdrant_collection()
         await qdrant.upsert(collection_name=QDRANT_COLLECTION, points=points)
 
         async with pool.acquire() as conn:
             await conn.execute(
                 "UPDATE documents SET chunk_count=$1, status='ready' WHERE id=$2",
-                len(chunks), uuid.UUID(doc_id),
+                len(all_chunks), uuid.UUID(doc_id),
             )
     except Exception as e:
         async with pool.acquire() as conn:
@@ -1063,7 +1226,7 @@ async def document_upload(
         raise HTTPException(500, f"Processing failed: {e}")
 
     return DocumentUploadResponse(
-        id=doc_id, filename=file.filename, chunk_count=len(chunks), status="ready"
+        id=doc_id, filename=file.filename, chunk_count=len(all_chunks), status="ready"
     )
 
 

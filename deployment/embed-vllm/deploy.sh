@@ -5,9 +5,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/user-values.env"
 
 MODEL_PATH="${HF_DIR}/${MODEL_ID}"
-export NAMESPACE RHIIS_IMAGE MODEL_ID MODEL_PATH HF_DIR PVC_SIZE
+export NAMESPACE RHIIS_IMAGE MODEL_ID MODEL_PATH HF_DIR PVC_SIZE EMBED_DIM
 
-VARS='${NAMESPACE} ${RHIIS_IMAGE} ${MODEL_ID} ${MODEL_PATH} ${HF_DIR} ${PVC_SIZE}'
+VARS='${NAMESPACE} ${RHIIS_IMAGE} ${MODEL_ID} ${MODEL_PATH} ${HF_DIR} ${PVC_SIZE} ${EMBED_DIM}'
 
 echo "==> Namespace"
 envsubst "$VARS" < "${SCRIPT_DIR}/k8s/namespace.yaml" | oc apply -f -
@@ -18,7 +18,7 @@ oc create secret generic hf-token-secret \
   -n "${NAMESPACE}" --dry-run=client -o yaml | oc apply -f -
 
 echo "==> Remaining manifests"
-for f in serviceaccount.yaml pvc-models.yaml deployment.yaml service.yaml; do
+for f in serviceaccount.yaml pvc-models.yaml configmap-embed-model.yaml deployment.yaml service.yaml; do
   envsubst "$VARS" < "${SCRIPT_DIR}/k8s/${f}" | oc apply -f -
 done
 

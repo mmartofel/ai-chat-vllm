@@ -385,6 +385,7 @@ createApp({
                         width: 1024,
                         height: 576,
                         previous_image_url: previousImageUrl,
+                        use_rag: useRag.value,
                     }),
                 });
                 if (res.status === 401) { isAuthenticated.value = false; return; }

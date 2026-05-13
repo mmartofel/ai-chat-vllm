@@ -68,6 +68,11 @@ spec:
             - |
               set -e
               MODEL_DIR=${MODEL_PATH}
+
+              # DEBUG
+              # Remove any existing config.json to force re-download
+              rm -rf ${MODEL_DIR}/config.json
+
               if [ -f "${MODEL_DIR}/config.json" ]; then
                 echo "Model already present at ${MODEL_DIR}, skipping download."
                 ls -alh ${MODEL_DIR}
