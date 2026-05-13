@@ -1,3 +1,4 @@
+import asyncio
 import io
 import os
 import uuid
@@ -272,17 +273,24 @@ def require_permission(perm: str):
 # --- Lifespan ---
 
 async def ensure_qdrant_collection():
-    try:
-        existing = await qdrant.get_collections()
-        names = [c.name for c in existing.collections]
-        if QDRANT_COLLECTION not in names:
-            await qdrant.create_collection(
-                collection_name=QDRANT_COLLECTION,
-                vectors_config=VectorParams(size=EMBED_DIM, distance=Distance.COSINE),
-            )
-        logger.info(f"Qdrant init completed, collection '{QDRANT_COLLECTION}' is ready")
-    except Exception as e:
-        logger.warning(f"Qdrant init skipped (will retry on first use): {e}")
+    for attempt in range(12):
+        try:
+            existing = await qdrant.get_collections()
+            names = [c.name for c in existing.collections]
+            if QDRANT_COLLECTION not in names:
+                await qdrant.create_collection(
+                    collection_name=QDRANT_COLLECTION,
+                    vectors_config=VectorParams(size=EMBED_DIM, distance=Distance.COSINE),
+                )
+            logger.info(f"Qdrant collection '{QDRANT_COLLECTION}' is ready")
+            return
+        except Exception as e:
+            wait = min(2 ** attempt, 30)
+            if attempt < 11:
+                logger.warning(f"Qdrant not ready (attempt {attempt + 1}/12): {e} — retrying in {wait}s")
+                await asyncio.sleep(wait)
+            else:
+                logger.error(f"Qdrant collection init failed after 12 attempts: {e}")
 
 
 @asynccontextmanager
@@ -1201,6 +1209,7 @@ async def document_upload(
             )
             for i, (vec, chunk, ctype, skey) in enumerate(zip(vectors, all_chunks, chunk_types, source_keys))
         ]
+        await ensure_qdrant_collection()
         await qdrant.upsert(collection_name=QDRANT_COLLECTION, points=points)
 
         async with pool.acquire() as conn:
