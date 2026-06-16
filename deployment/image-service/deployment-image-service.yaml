@@ -41,7 +41,7 @@ spec:
             nvidia.com/gpu: "1"
           requests:
             memory: "4Gi"
-            cpu: "1"
+            cpu: "250m"
             nvidia.com/gpu: "1"
         livenessProbe:
           httpGet:
